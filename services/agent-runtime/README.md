@@ -40,8 +40,8 @@ One image runs three Deployments (shopper, storeops, refunds) and the insights-n
 
 ## Batch mode (insights-nightly)
 
-1. Get a token with the client-credentials grant. That gives `obo_sub=none` and `obo_role=none`.
-2. Run the scenario plan.
+1. Run the scenario whose `persona` is `job:<agent_id>`. Its own `token` steps get the client-credentials tokens: no human is involved, so they carry `obo_sub=none` and `obo_role=none`. The runtime does not fetch a token beforehand, so those token steps are what the trace shows at `i=0` and `i=1`.
+2. Run the rest of the plan with those tokens.
 3. Write each Step as a JSON line to stdout, prefixed with `TRACE `. The cockpit tails them through the vK8s API (pod logs). `TODO(verify-xc)`: vK8s supports `kubectl logs`. If it doesn't, post the trace to `cockpit-lb` over the internet instead.
 4. Exit 0 even when steps are blocked. Blocked steps are the expected outcome.
 

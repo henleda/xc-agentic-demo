@@ -5,12 +5,13 @@ agent: none
 message: "(cockpit Partner tab)"
 trigger: ".*"
 plan:
-  - token: { grant: client_credentials, client_id: granite-supply, audience: copperline-partner, save_as: partner_tok }
-  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/purchase-orders", auth: partner_tok }
-  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/internal/cost-sheet", auth: partner_tok }
-  - http: { method: POST, url: "https://partner.${DEMO_DOMAIN}/v1/asn", auth: partner_tok,
+  - token: { grant: client_credentials, client_id: granite-supply, audience: copperline-partner, save_as: partner_tok,
+             url: "${PARTNER_BASE_URL}/auth/token" }    # through partner-lb, like the real partner would
+  - http: { method: GET, url: "${PARTNER_BASE_URL}/v1/purchase-orders", auth: partner_tok }
+  - http: { method: GET, url: "${PARTNER_BASE_URL}/v1/internal/cost-sheet", auth: partner_tok }
+  - http: { method: POST, url: "${PARTNER_BASE_URL}/v1/asn", auth: partner_tok,
             body: { po_id: "PO-5531' OR '1'='1", carrier: "UPS", items: [] } }
-  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/purchase-orders?page={n}", auth: partner_tok }
+  - http: { method: GET, url: "${PARTNER_BASE_URL}/v1/purchase-orders?page={n}", auth: partner_tok }
     repeat: 50                  # n is 1-based (1..50); OpenAPI allows page 1..100
     concurrency: 10             # finish inside the 10 s rate-limit window
 expect:

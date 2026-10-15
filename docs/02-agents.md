@@ -58,31 +58,43 @@ In `config/agents/shopper.yaml`, `declared_tools` includes `refunds.issue_refund
 ## Agent runtime behavior (shared by all agents)
 
 - One image, `agent-runtime`. Its behavior comes from `AGENT_CONFIG` (path to a mounted YAML).
-- API: `POST /v1/chat` with the user token in `Authorization`. The request body is `{ "messages": [...], "scenario_hint": optional }`.
-- Response body: `{ "reply": str, "trace": [Step] }`. Each Step is:
+- **API:** `POST /v1/chat`, with the user token in `Authorization`.
+  - Request body: `{ "messages": [{"role": "user" | "assistant", "content": str}, ...], "scenario_hint": str? }`.
+  - `scenario_hint` narrows safe-mode matching to one scenario ID. The trigger and persona must still match.
+- **Response body:** `{ "reply": str, "scenario": str | null, "trace": [Step] }`. Each Step is:
 
   ```
   {
-    "n": int,
-    "kind": "model" | "tool" | "token",
-    "target": str,
-    "tool": str?,
-    "args_preview": str?,
-    "status": int,
+    "n": int,                 # 1-based position in this trace (display order)
+    "i": int | null,          # plan index after repeat expansion; null for unscripted steps.
+                              #   Scenario expect blocks address steps by this field.
+    "kind": "token" | "model" | "tool" | "http",
+    "target": str,            # URL called, e.g. http://tools.agentic-demo/mcp/refunds
+    "tool": str?,             # fully-qualified tool, e.g. refunds.issue_refund
+    "mcp_name_header": str?,  # only when the Mcp-Name header differs from the body (S1b)
+    "args_preview": str?,     # JSON of the arguments, truncated
+    "status": int | null,     # null = no HTTP response at all
     "blocked_by": "xc" | "server" | "network" | null,
     "reason": str?,
+    "is_error": bool?,        # tool steps: the MCP result's isError
+    "result_preview": str?,   # response text: tool content text, model reply, or raw body
+    "result_truncated": bool, # true when result_preview was cut
+    "identity": {...}?,       # token steps: agent_id, agent_role, obo_sub, obo_role, aud of the minted token
     "latency_ms": int,
-    "scripted": bool
+    "scripted": bool,
+    "request_id": str
   }
   ```
 
-- Loop:
+  The trace includes the agent's own token exchanges as `kind: "token"` steps with `i: null`, but only when an exchange actually happened (not on a cache hit).
+- **Loop:**
   1. Exchange the user token for tools and llm tokens. Cache each until 30 seconds before expiry.
   2. Call the model with the declared tools.
   3. Execute the tool calls.
-  4. Repeat, up to `max_steps`: 8 by default, 40 for storeops in S4.
+  4. Repeat, up to `max_steps` (default 8). Scripted plans are not bounded by `max_steps` (`scenarios/README.md`).
 - Model calls go to `http://llm.agentic-demo/v1/converse` with header `x-model-route: <route>`.
 - Tool calls follow MCP 2026-07-28 stateless Streamable HTTP. They go to `http://tools.agentic-demo/mcp/<server>` with headers `Mcp-Method: tools/call` and `Mcp-Name: <tool>`.
 - `DEMO_SAFE_MODE=true`: if the last user message matches a `trigger` in any `scenarios/*.yaml` targeting this agent, the runtime runs that scenario's `plan` (model and tool steps) instead of asking the model what to do. It still asks the model for the final natural-language reply, unless `plan.final_reply` is set.
 - On a 401, 403 or 429 from an XC LB, recognise the XC block page or JSON and set `blocked_by: "xc"`. Then tell the model "Tool call denied by policy (HTTP 403)" and let it recover.
+  - Every Copperline service stamps its responses with `x-copperline-origin`. A 4xx from an LB that lacks this header came from the fabric. See `services/common/README.md`, under `xcblock`.
   - `TODO(verify-xc)`: capture the exact block response format for service-policy deny, WAF block and rate-limit 429, so the runtime can tell them apart. Record samples in `docs/08`.

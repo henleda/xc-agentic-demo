@@ -62,3 +62,12 @@ Fill these in during Phase 3. The XC block detector in `services/common` depends
 | R29 | OpenAPI validation on partner-lb can be scoped to `/v1/*`, so `/auth/token` (not in the spec) is not hit by fall-through block | unverified | S6 token step | Give the token endpoint its own LB (`partner-auth-lb`) with no API definition |
 | R30 | App Stack AWS VPC site supports two interfaces (outside and inside) | unverified | All EC2 origins | Use one interface, set IP origin pools to the outside network, and allow the ce-outside subnet in `sg-core` |
 | R31 | `${EXFIL_TEST_URL}` is reachable from a CE vK8s pod **without** the network policy | to check in Phase 2 | S5 | Proves the policy (not DNS or NAT) is what blocks exfil |
+
+## Added during Phase 1 (local build)
+
+| ID | Assumption | Status | Scenario impact | Fallback |
+|---|---|---|---|---|
+| R32 | XC passes the origin response header `x-copperline-origin` through unchanged, and XC-generated block responses (service policy, WAF, rate limit, JWT, API validation) do **not** carry it. `xcblock` uses this to tell `xc` from `server` | unverified | S1, S1b, S3a, S4, S5, S6: every `blocked_by` assertion | Match on the XC block-page or JSON signature recorded in the table above |
+| R33 | XC does not rewrite or drop a client-supplied `x-request-id` on internal and public LBs | unverified | Log correlation only | Correlate by timestamp and `agent_id`; the cockpit trace carries its own request ID per step |
+| R34 | The custom request header `x-demo-scenario` reaches the origin through llm-lb unchanged (the AI gateway's stub mode keys canned replies on it) | unverified | Only `DEMO_STUB_MODEL=true` (outage fallback) | The stub falls back to a generic reply. Not on stage, since real Bedrock is the default |
+| R35 | XC JWT validation accepts the literal string `"none"` for the mandatory claims `obo_role` / `obo_sub` (machine-mode tokens), so S5 is denied by **service policy** (403), not by JWT validation (401) | unverified | S5 i=2, i=3 | If XC rejects it, S5 still shows a fabric block (401). Update the `expect.tenant` status with the user's approval; do not silently loosen it |

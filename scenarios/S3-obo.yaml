@@ -20,7 +20,8 @@ variants:
         xc_log_hint: "service policy deny: agent_role=refunds, obo_role=care_agent"
       local:
         steps:
-          - { i: 1, status: 403 }
+          - { i: 1, status: 403, blocked_by: xc }
+        estate_delta: { refunds_issued: 0 }
   - id: S3b
     persona: morgan.chen
     agent: refunds
@@ -40,3 +41,4 @@ variants:
       local:
         steps:
           - { i: 1, status: 200 }
+        estate_delta: { refunds_issued: 1 }
