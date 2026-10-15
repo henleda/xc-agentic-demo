@@ -1,6 +1,7 @@
 .env
 *.p12
 *.pem
+.secrets/
 deploy/vk8s/secrets/rendered/
 deploy/vk8s/rendered/
 deploy/xc/generated/
@@ -11,3 +12,5 @@ deploy/aws/*.tfstate*
 results/*.json
 __pycache__/
 .venv/
+.pytest_cache/
+.ruff_cache/

@@ -1,34 +1,40 @@
-.PHONY: check policy lint test local-up local-down images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+.PHONY: check policy lint test local-up local-down local-scenarios images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+
+# All Python runs through uv so everyone gets the same interpreter (3.12, see .python-version) and deps.
+PY := uv run python
 
 check: policy lint test            ## everything CI runs
 policy:
-	python scripts/gen_policy.py --check
+	$(PY) scripts/gen_policy.py --check
 lint:
-	uv run ruff check services scripts
+	uv run ruff check services scripts deploy/local
 test:
 	uv run pytest -q
 
-local-up:
-	docker compose -f deploy/local/docker-compose.yaml --env-file .env up -d --build
+local-up:                          ## laptop mode, no XC (see deploy/local/README.md)
+	$(PY) scripts/gen_keys.py --if-missing
+	docker compose -f deploy/local/docker-compose.yaml up -d --build --wait
 local-down:
 	docker compose -f deploy/local/docker-compose.yaml down -v
+local-scenarios:
+	$(PY) scripts/run_scenario.py --all --env local
 
 images:                            ## multi-arch build + push; verifies arbitrary-UID run
 	scripts/build_images.sh
 deploy-aws:
 	cd deploy/aws && terraform init && terraform apply
 deploy-vk8s:
-	python scripts/render_secrets.py && python scripts/render_manifests.py && \
+	$(PY) scripts/render_secrets.py && $(PY) scripts/render_manifests.py && \
 	kubectl --kubeconfig $$HOME/.kube/agentic-demo.yaml apply -f deploy/vk8s/secrets/rendered/ && \
 	kubectl --kubeconfig $$HOME/.kube/agentic-demo.yaml apply -f deploy/vk8s/rendered/
 deploy-xc:
-	python scripts/gen_policy.py && cd deploy/xc/terraform && terraform init && terraform apply
+	$(PY) scripts/gen_policy.py && cd deploy/xc/terraform && terraform init && terraform apply
 
 smoke:
-	python scripts/smoke_test.py --env tenant
+	$(PY) scripts/smoke_test.py --env tenant
 scenarios:
-	python scripts/run_scenario.py --all --env tenant
+	$(PY) scripts/run_scenario.py --all --env tenant
 latency:
-	python scripts/measure_latency.py --env tenant
+	$(PY) scripts/measure_latency.py --env tenant
 reset:
 	scripts/reset_demo.sh

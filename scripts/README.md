@@ -2,7 +2,7 @@
 
 | Script | Status | Purpose |
 |---|---|---|
-| `gen_policy.py` | **working** | Matrix → generated service-policy intent and consistency check |
+| `gen_policy.py` | **working** | Matrix → generated service-policy intent and consistency check (agent configs, rate-limit sync). Tests in `scripts/tests/` |
 | `gen_keys.py` | to build | Create the IdP RSA key and write `deploy/xc/generated/jwks.json` |
 | `render_secrets.py` | to build | `.env` + generated client secrets → `deploy/vk8s/secrets/rendered/*.yaml` |
 | `render_manifests.py` | to build | Substitute `${REGISTRY}`/`${IMAGE_TAG}`, render the `agent-configs` ConfigMap from `config/`, write `deploy/vk8s/rendered/` |

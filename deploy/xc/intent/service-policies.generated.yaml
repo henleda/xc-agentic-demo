@@ -344,7 +344,8 @@ service_policies:
   - name: allow-shopper-route-fast
     action: allow
     match:
-      path_prefix: /v1/
+      path_exact: /v1/converse
+      method: POST
       jwt_claims:
         agent_role:
         - shopper
@@ -356,7 +357,8 @@ service_policies:
   - name: allow-storeops-route-fast
     action: allow
     match:
-      path_prefix: /v1/
+      path_exact: /v1/converse
+      method: POST
       jwt_claims:
         agent_role:
         - storeops
@@ -368,7 +370,8 @@ service_policies:
   - name: allow-storeops-route-standard
     action: allow
     match:
-      path_prefix: /v1/
+      path_exact: /v1/converse
+      method: POST
       jwt_claims:
         agent_role:
         - storeops
@@ -380,7 +383,8 @@ service_policies:
   - name: allow-refunds-route-standard
     action: allow
     match:
-      path_prefix: /v1/
+      path_exact: /v1/converse
+      method: POST
       jwt_claims:
         agent_role:
         - refunds

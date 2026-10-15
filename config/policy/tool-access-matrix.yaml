@@ -63,8 +63,8 @@ agents:
       - tool: refunds.issue_refund
         require_obo_roles: [care_supervisor]     # on-behalf-of constraint enforced at XC (S3)
 
-# Rate-limit intents. NOT yet rendered by gen_policy.py: deploy/xc/intent/30-security.yaml (rl-tools) mirrors them by hand.
-# Claude Code: either extend gen_policy.py to render rl-tools, or keep both in sync and add a check.
+# Rate-limit intents. Not rendered: deploy/xc/intent/30-security.yaml (rl-tools) and the llm-lb rate_limit in
+# 20-load-balancers.yaml mirror them by hand. `gen_policy.py --check` fails with RL_DRIFT if they disagree.
 rate_limits:
   tools_default_per_agent_identity: { requests: 60, per: minute }
   llm_default_per_agent_identity:   { requests: 30, per: minute }

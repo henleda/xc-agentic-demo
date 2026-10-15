@@ -80,7 +80,9 @@ Before generating, check: (1) how many rules fit in a service policy, (2) whethe
 
 ## Generated service policy `sp-llm`
 
-For each agent A and each route R in A.model_routes: allow if `agent_role == A.agent_role` AND `obo_role in A.allowed_user_roles` AND header `x-model-route == R`. Otherwise deny.
+For each agent A and each route R in A.model_routes: allow if `POST /v1/converse` (exact path) AND `agent_role == A.agent_role` AND `obo_role in A.allowed_user_roles` AND header `x-model-route == R`. Otherwise deny.
+
+The rule is pinned to `POST /v1/converse` so agents cannot reach other gateway endpoints, such as `GET /v1/usage`, through llm-lb.
 
 ## User identification
 
