@@ -1,0 +1,19 @@
+id: S1b
+title: "Honest gap: allowed tool in header, forbidden tool in body"
+persona: mallory.x
+agent: shopper
+message: "Show me everything about order CO-1042."
+trigger: "show me everything about order co-1042"
+plan:
+  - tool: orders.get_order_details              # body says get_order_details (forbidden for shopper)
+    args: { order_id: CO-1042 }
+    header_name_override: get_order_status      # header says get_order_status (allowed)
+final_reply: "Sorry, I can only share the status of that order."
+expect:
+  tenant:
+    steps:
+      - { i: 0, status: 400, blocked_by: server }   # XC ALLOWS; MCP server rejects -32020
+    xc_log_hint: "tools-lb request logs show 400 from origin; NO service policy deny. This is the point."
+  local:
+    steps:
+      - { i: 0, status: 400, blocked_by: server }

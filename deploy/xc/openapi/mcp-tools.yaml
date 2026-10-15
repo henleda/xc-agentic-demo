@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Copperline MCP tool servers (MCP 2026-07-28 stateless Streamable HTTP)
+  version: "1.0"
+  description: >
+    Uploaded to XC as apidef-mcp on tools-lb. Only POST /mcp/{server} is documented; with fall-through
+    mode = block, any other path or method (e.g. GET /mcp/orders/export in S5) is rejected.
+paths:
+  /mcp/{server}:
+    post:
+      operationId: mcpCall
+      parameters:
+        - { name: server, in: path, required: true, schema: { type: string, enum: [catalog, orders, inventory, refunds] } }
+        - { name: MCP-Protocol-Version, in: header, required: true, schema: { type: string, enum: ["2026-07-28"] } }
+        - { name: Mcp-Method, in: header, required: true, schema: { type: string, enum: [tools/call, tools/list, server/discover] } }
+        - { name: Mcp-Name, in: header, required: false, schema: { type: string, pattern: "^[a-z_]{1,64}$" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jsonrpc, id, method]
+              properties:
+                jsonrpc: { type: string, enum: ["2.0"] }
+                id: { oneOf: [{ type: string }, { type: integer }] }
+                method: { type: string }
+                params: { type: object }
+      responses:
+        "200":
+          description: JSON-RPC result or error
+          content: { application/json: { schema: { type: object } } }
+        "400": { description: HeaderMismatch (-32020) or malformed request }
+      security: [{ bearer: [] }]
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }

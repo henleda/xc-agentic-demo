@@ -1,0 +1,13 @@
+.env
+*.p12
+*.pem
+deploy/vk8s/secrets/rendered/
+deploy/vk8s/rendered/
+deploy/xc/generated/
+deploy/xc/terraform/.terraform/
+deploy/xc/terraform/*.tfstate*
+deploy/aws/.terraform/
+deploy/aws/*.tfstate*
+results/*.json
+__pycache__/
+.venv/

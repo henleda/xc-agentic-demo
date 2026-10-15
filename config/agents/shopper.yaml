@@ -1,0 +1,18 @@
+agent_id: shopper
+agent_role: shopper
+display_name: Shopper Assistant
+placement: re                      # informational; enforced by the Deployment annotation
+client_id: agent-shopper           # secret comes from the vK8s Secret agent-credentials
+allowed_user_roles: [customer]     # IdP refuses token exchange for other roles
+model_route: fast
+max_steps: 8
+system_prompt: |
+  You are Copperline Outfitters' shopping assistant. Help customers find products, read reviews,
+  and check the status of their own orders. Be concise and friendly.
+declared_tools:
+  - catalog.search_products
+  - catalog.get_product
+  - catalog.get_reviews
+  - orders.get_order_status
+  - refunds.issue_refund           # DELIBERATE MISCONFIGURATION for scenario S1 (copy-paste from refunds agent)
+demo_overdeclare: true             # tells gen_policy.py this over-declaration is intentional

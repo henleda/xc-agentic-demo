@@ -1,0 +1,19 @@
+id: S2
+title: PII never reaches the model (Data Guard)
+persona: sam.patel
+agent: refunds
+message: "Customer on the phone about CO-1042, pull up the order details."
+trigger: "pull up the order details"
+plan:
+  - tool: orders.get_order_details
+    args: { order_id: CO-1042 }
+  - model: { route: standard }
+final_reply: null
+expect:
+  tenant:
+    steps:
+      - { i: 0, status: 200, blocked_by: null, body_not_contains: "4111111111111111", body_not_contains_alt: "4111 1111 1111 1111" }
+    xc_log_hint: "API inventory on tools-lb: /mcp/orders tagged sensitive (credit card, email)"
+  local:
+    steps:
+      - { i: 0, status: 200 }                   # local gateway does not mask; expected

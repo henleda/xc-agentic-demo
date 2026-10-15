@@ -1,0 +1,37 @@
+# The SHADOW agent. "Deployed by marketing" without review, using a COPIED storeops client secret.
+# suspend: true -> the cockpit "Run insights-nightly" button creates a Job from this CronJob
+#   (equivalent of: kubectl create job --from=cronjob/insights-nightly insights-run-<salt>)
+# TODO(verify-xc): confirm 'create job --from=cronjob' works against the vK8s API; fallback is a
+#   Deployment with replicas: 0 that the cockpit scales to 1 (see docs/08 R25).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: insights-nightly
+  annotations: { ves.io/virtual-sites: "agentic-demo/vs-ce-aws" }
+spec:
+  schedule: "17 3 * * *"
+  suspend: true
+  jobTemplate:
+    metadata:
+      annotations: { ves.io/virtual-sites: "agentic-demo/vs-ce-aws" }   # verify: R25 — Jobs created from the CronJob must carry placement
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        metadata: { labels: { app: insights-nightly, tier: batch } }
+        spec:
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, runAsUser: 10001, runAsGroup: 0 }
+          containers:
+            - name: job
+              image: ${REGISTRY}/agent-runtime:${IMAGE_TAG}
+              env:
+                - { name: AGENT_CONFIG, value: /config/insights-nightly.yaml }
+                - { name: MODE, value: batch }
+                - name: AGENT_CLIENT_SECRET
+                  valueFrom: { secretKeyRef: { name: agent-credentials, key: agent-storeops } }   # the copied secret
+                - { name: TRACE_SINK, value: "stdout" }   # batch traces: JSON to stdout; cockpit reads them via kubectl logs (see services/agent-runtime/README.md)
+              envFrom: [{ configMapRef: { name: runtime-env } }]
+              volumeMounts: [{ name: cfg, mountPath: /config }, { name: tmp, mountPath: /tmp }]
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+          volumes: [{ name: cfg, configMap: { name: agent-configs } }, { name: tmp, emptyDir: {} }]

@@ -1,0 +1,42 @@
+id: S3
+title: "On-behalf-of: right agent, wrong human (a) then right human (b)"
+variants:
+  - id: S3a
+    persona: sam.patel
+    agent: refunds
+    message: "Refund $120 on CO-1042, item arrived damaged."
+    trigger: "refund \\$120 on co-1042"   # same text as S3b; plans are identical, so the match is unambiguous
+    plan:
+      - tool: orders.get_order_details
+        args: { order_id: CO-1042 }
+      - tool: refunds.issue_refund
+        args: { order_id: CO-1042, amount: 120, reason: damaged }
+    final_reply: null
+    expect:
+      tenant:
+        steps:
+          - { i: 1, status: 403, blocked_by: xc }
+        estate_delta: { refunds_issued: 0 }
+        xc_log_hint: "service policy deny: agent_role=refunds, obo_role=care_agent"
+      local:
+        steps:
+          - { i: 1, status: 403 }
+  - id: S3b
+    persona: morgan.chen
+    agent: refunds
+    message: "Refund $120 on CO-1042, item arrived damaged."
+    trigger: "refund \\$120 on co-1042"
+    plan:
+      - tool: orders.get_order_details
+        args: { order_id: CO-1042 }
+      - tool: refunds.issue_refund
+        args: { order_id: CO-1042, amount: 120, reason: damaged }
+    final_reply: null
+    expect:
+      tenant:
+        steps:
+          - { i: 1, status: 200, blocked_by: null }
+        estate_delta: { refunds_issued: 1 }
+      local:
+        steps:
+          - { i: 1, status: 200 }

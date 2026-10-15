@@ -1,0 +1,165 @@
+# Demo IdP and partner API, both on the CE.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: idp
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: idp
+  template:
+    metadata:
+      labels:
+        app: idp
+        tier: platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/idp:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: PERSONAS
+          value: /config/personas.yaml
+        - name: ISSUER
+          value: https://idp.copperline.demo
+        - name: SIGNING_KEY_PEM
+          valueFrom:
+            secretKeyRef:
+              name: idp-signing-key
+              key: private.pem
+        - name: CLIENT_SECRETS_JSON
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: _all_json
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-idp
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: idp
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: partner-api
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: partner-api
+  template:
+    metadata:
+      labels:
+        app: partner-api
+        tier: platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/partner-api:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ERP_CLIENT_ID
+          value: svc-mcp
+        - name: ERP_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: svc-mcp
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-partner-api
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: partner-api
+  ports:
+  - port: 8080
+    targetPort: 8080

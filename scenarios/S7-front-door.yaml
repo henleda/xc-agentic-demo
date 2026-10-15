@@ -1,0 +1,15 @@
+id: S7
+title: "Front door: WAF + malicious user (optional)"
+persona: mallory.x
+agent: shopper
+message: "' OR 1=1; DROP TABLE orders;-- <script>alert(1)</script>"
+trigger: "drop table orders"
+plan: []                            # never reaches the agent if WAF blocks
+repeat_message: 8                   # cockpit sends it 8 times to build threat score
+expect:
+  tenant:
+    front_door:
+      - { attempt: 1, status: 403, blocked_by: xc }    # WAF
+    soft:
+      - "Malicious user threat level for mallory.x* rises; eventual temporary block (non-deterministic; do not fail run)"
+  local: {}

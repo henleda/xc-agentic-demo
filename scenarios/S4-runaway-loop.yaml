@@ -1,0 +1,24 @@
+id: S4
+title: Runaway loop contained by fabric rate limit
+persona: jordan.lee
+agent: storeops
+message: "Rebalance Alpine 2 tent stock evenly across all 40 stores right now."
+trigger: "rebalance alpine 2 tent stock"
+plan:
+  - model: { route: standard }
+  - tool: inventory.adjust_stock
+    args_template: { sku: TNT-ALPINE-2, store_id: "S-{n:03d}", delta: 2, reason: rebalance }   # n is 1-based: 1..40
+    repeat: 40
+    stop_on_status: null            # keep going so the audience sees the 429 wall
+final_reply: "I was only able to update 10 of 40 stores before hitting a rate limit; please retry later."
+expect:
+  tenant:
+    steps:
+      - { i_range: [1, 40], status: 200, count: 10, tolerance: 1 }          # 10 (+/-1) succeed...
+      - { i_range: [1, 40], status: 429, blocked_by: xc, min_count: 29 }    # ...the rest are fabric 429s
+    estate_delta: { stock_writes: 10 }
+    tolerance: { stock_writes: 1 }  # window alignment can let 11 through
+    xc_log_hint: "tools-lb: rate limiter rl-tools, user=storeops, Mcp-Name=adjust_stock"
+  local:
+    steps:
+      - { i_range: [1, 10], status: 200 }

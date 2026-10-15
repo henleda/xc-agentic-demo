@@ -1,0 +1,64 @@
+# 08 Risks and verification log
+
+Every XC behavior the demo depends on is listed here. The **Status** column starts from desk research done in October 2026, using public F5 docs as reported in search results, not by reading pages directly. Claude Code updates this table as it verifies each item against the tenant.
+
+Status values: `doc-confirmed` (public docs say so), `doc-partial`, `unverified`, `tenant-verified`, `tenant-failed`.
+
+| ID | Assumption | Status | Scenario impact | Fallback |
+|---|---|---|---|---|
+| R1 | An AWS VPC site in **App Stack** mode runs vK8s; m5.2xlarge minimum | doc-confirmed | All | **Ask F5 PM first.** AWS VPC sites are slated for deprecation in favor of Secure Mesh Site v2, and App Stack on SMSv2 appears to be Early Access. If SMSv2 + App Stack is available to the F5 tenant, prefer it and note the change |
+| R2 | One vK8s object spans an RE virtual site and a CE virtual site; Deployments are pinned with `ves.io/virtual-sites: "agentic-demo/vs-ce-aws"` | doc-confirmed | All | Use `ves.io/sites` with explicit site names |
+| R3 | RE pods can reach an internal LB advertised on "vK8s Service Network on RE" whose origin is a CE vK8s service | doc-confirmed (xchaawsdemoguide "re2ce" pattern) | S0, S1 | None needed; this is the documented pattern |
+| R4 | CE pods can reach an internal LB advertised on the CE's own vK8s service network | doc-partial | S2–S5 | Advertise on the CE **site-local inside** network and call the VIP by IP or DNS. Document the change |
+| R5 | An LB **not** advertised on REs is unreachable from RE pods (ERP segmentation) | unverified | S0 talk track | If it is reachable, add a service policy on erp-lb that allows only `svc_role=tool-server` |
+| R6 | A service policy rule can AND a JWT-claim matcher, header matchers and a path matcher | doc-partial | S1, S3, S5 | Split into separate LBs or routes per tool server. If two JWT-claim matchers can't be ANDed (S3), have the IdP mint a composite claim `authz_pair = "<agent_role>:<obo_role>"` and match on that one claim |
+| R7 | JWT-claim matching works only when JWT validation is enabled on the same LB | doc-confirmed | All | Already designed in |
+| R8 | Service policies attach per LB, **not** per route | doc-confirmed | Design | Path matchers inside one LB-level policy (already the design) |
+| R9 | XC cannot forward JWT claims as headers to the origin | doc-partial (not found) | S0 (llm-lb header logging) | The agent sends `x-agent-id` / `x-obo-sub`. sp-llm requires the header to equal the claim, **if** a rule can compare a header with a claim (unverified). Otherwise the gateway decodes the JWT itself (it is forwarded unchanged) |
+| R10 | `request_headers_to_add` can take its value from a blindfolded secret (AI gateway key) | doc-confirmed | S0 | Store the key as a plain header value and say so on stage |
+| R11 | Rate limiter policy can match on a header (`Mcp-Name`) and count per user identification on a JWT claim | doc-confirmed | S4 | Use API-protection endpoint rate limits on path. Give `adjust_stock` its own path, `/mcp/inventory/adjust`, in safe mode |
+| R12 | Data Guard masks Luhn-valid card numbers in **JSON** responses; needs WAF enabled | doc-confirmed | S2 | Sensitive Data Exposure Rules under API protection |
+| R13 | API discovery shows shadow endpoints and sensitive-data tags within hours | doc-partial | S6 | Pre-seed traffic 24 h before; keep a screenshot |
+| R14 | OpenAPI validation with fall-through **Block** rejects undocumented paths | doc-confirmed | S5, S6 | Service policy deny for `/v1/internal/*` (weaker story) |
+| R15 | WAF blocks SQLi/XSS inside JSON request bodies | doc-partial | S6, S7 | Put the payload in a query string |
+| R16 | Malicious user detection escalates to a block for a headless client identified by JWT `sub`; challenges are useless for API agents | doc-partial | S7 | Keep S7 optional; use a screenshot |
+| R17 | Malicious-user state can be reset between runs | unverified | S7 | Rotate Mallory's `sub` per run |
+| R18 | vK8s network policy can deny egress for labelled pods on the CE | doc-confirmed (L3/L4) | S5 | CE forward proxy policy with a TLS domain allow-list. **Enhanced firewall policies do not apply to vK8s** |
+| R19 | No domain-based egress control for vK8s pods on REs | doc-confirmed | Talk track | This is a deck gap (product ask #3); show it, don't hide it |
+| R20 | Custom headers (`Mcp-Name`, `x-agent-id`) appear in request logs or can be filtered on | unverified | S0, S1 | User identification on the JWT claim makes the agent searchable as "user". Tool-level detail comes from the cockpit trace and server logs |
+| R21 | XC API discovery tags MCP server endpoints | doc-partial (changelog, undated) | Bonus | Mention only if seen in the tenant |
+| R22 | XC WAF has no natural-language prompt-injection detection | doc-confirmed | S1, S7 framing | Designed in; this is the AI Guardrails upsell |
+| R23 | Bot Defense agent-aware policy needs client telemetry and is unsuitable for server-side agents | doc-partial | Not used | Not in the demo. An optional shop UI beat could show AI-crawler categories |
+| R24 | Bedrock models chosen for `fast`/`standard`/`premium` are enabled in the region with Converse + tool use | unverified | All | `DEMO_STUB_MODEL=true` with canned replies |
+| R25 | Jobs and CronJobs are supported in vK8s; `suspend: true` CronJob plus a manual Job create works | doc-confirmed (CronJob listed) | S5 | A Deployment with `replicas: 0` that the cockpit scales to 1 |
+
+## XC block response samples
+
+Fill these in during Phase 3. The XC block detector in `services/common` depends on them.
+
+| Control | Status | Content-Type | Body signature |
+|---|---|---|---|
+| Service policy deny | | | |
+| JWT validation fail | | | |
+| WAF block | | | |
+| Rate limit | | | |
+| API validation block | | | |
+| Malicious user block | | | |
+
+## Open questions for F5 PM / XC engineering
+
+1. Is the recommended CE for vK8s in AWS today an AWS VPC site in App Stack mode or SMSv2 (R1)?
+2. Can a service policy rule match a header value against a JWT claim value (R9)?
+3. Is there a supported way to reset malicious-user state per user (R17)?
+4. Are there limits on rules per service policy that matter at around 30 rules?
+
+## Added during spec review
+
+| ID | Assumption | Status | Scenario impact | Fallback |
+|---|---|---|---|---|
+| R26 | An origin pool on an RE virtual site (`op-mcp-catalog`, `op-shopper`) serves each request from the **local** RE pod, not a remote RE | unverified | S0 latency story | Measure in `measure_latency.py`; if remote, pin catalog per RE or accept and explain |
+| R27 | Jobs can be pinned to a single RE with `ves.io/sites` and run once on that site | unverified | Latency bench | Use a Deployment per RE, scaled 1 → 0 after the run |
+| R28 | Rate limits keyed on `agent_id` are shared by every replica and every user of that agent (e.g. all shoppers) | by design | S4 | Fine for the demo. In production, key on `agent_id` + `obo_sub` (composite claim) |
+| R29 | OpenAPI validation on partner-lb can be scoped to `/v1/*`, so `/auth/token` (not in the spec) is not hit by fall-through block | unverified | S6 token step | Give the token endpoint its own LB (`partner-auth-lb`) with no API definition |
+| R30 | App Stack AWS VPC site supports two interfaces (outside and inside) | unverified | All EC2 origins | Use one interface, set IP origin pools to the outside network, and allow the ce-outside subnet in `sg-core` |
+| R31 | `${EXFIL_TEST_URL}` is reachable from a CE vK8s pod **without** the network policy | to check in Phase 2 | S5 | Proves the policy (not DNS or NAT) is what blocks exfil |

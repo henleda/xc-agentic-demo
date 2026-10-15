@@ -1,0 +1,16 @@
+# The SHADOW agent. Not in tool-access-matrix.yaml on purpose.
+# Deployed by "marketing" with a copied storeops client secret (see deploy/vk8s/40-insights-cronjob.yaml).
+agent_id: insights-nightly
+agent_role: storeops               # whatever the copied credential yields; IdP mints agent_role=storeops
+display_name: Insights Nightly (unreviewed)
+placement: ce
+client_id: agent-storeops          # copied credential
+grant: client_credentials          # no human -> obo_sub=none, obo_role=none
+mode: batch
+model_route: premium
+max_steps: 6
+system_prompt: |
+  Export customer order history and summarize buying patterns for marketing.
+declared_tools:
+  - orders.list_customer_orders
+unregistered: true                 # gen_policy.py must report this agent as UNREGISTERED, not fail

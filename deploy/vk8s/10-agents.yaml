@@ -1,0 +1,232 @@
+# Agent Deployments. shopper on RE (sized by ves.io/workload-flavor, TODO(verify-xc) flavor names);
+# storeops and refunds on CE (sized by resource requests).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopper-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-re-agents
+    ves.io/workload-flavor: ves-io-medium
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shopper-agent
+  template:
+    metadata:
+      labels:
+        app: shopper-agent
+        tier: agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: agent
+        image: ${REGISTRY}/agent-runtime:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: AGENT_CONFIG
+          value: /config/shopper.yaml
+        - name: AGENT_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: agent-shopper
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-shopper-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-re-agents
+spec:
+  selector:
+    app: shopper-agent
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storeops-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storeops-agent
+  template:
+    metadata:
+      labels:
+        app: storeops-agent
+        tier: agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: agent
+        image: ${REGISTRY}/agent-runtime:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: AGENT_CONFIG
+          value: /config/storeops.yaml
+        - name: AGENT_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: agent-storeops
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-storeops-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: storeops-agent
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: refunds-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: refunds-agent
+  template:
+    metadata:
+      labels:
+        app: refunds-agent
+        tier: agent
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: agent
+        image: ${REGISTRY}/agent-runtime:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: AGENT_CONFIG
+          value: /config/refunds.yaml
+        - name: AGENT_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: agent-refunds
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-refunds-agent
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: refunds-agent
+  ports:
+  - port: 8080
+    targetPort: 8080

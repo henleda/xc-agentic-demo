@@ -1,0 +1,26 @@
+# Runs on EC2 copperline-core: the "customer estate". Images from ${REGISTRY}.
+services:
+  erp-mock:
+    image: ${REGISTRY}/erp-mock:${IMAGE_TAG}
+    ports: ["8081:8081", "127.0.0.1:8181:8181"]     # 8181 = admin, localhost only
+    environment: { JWKS_PATH: /jwks/jwks.json }    # EC2 cannot resolve vK8s names; JWKS is a file
+    volumes: ["/opt/copperline/jwks.json:/jwks/jwks.json:ro"]
+    restart: unless-stopped
+  copperline-ai-gw:
+    image: ${REGISTRY}/ai-gw:${IMAGE_TAG}
+    ports: ["8090:8090"]
+    environment:
+      AWS_REGION: ${AWS_REGION}
+      ROUTE_FAST: ${ROUTE_FAST}
+      ROUTE_STANDARD: ${ROUTE_STANDARD}
+      ROUTE_PREMIUM: ${ROUTE_PREMIUM}
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY}
+      GATEWAY_REQUIRE_KEY: "true"
+      DEMO_STUB_MODEL: ${DEMO_STUB_MODEL}
+    restart: unless-stopped
+  cockpit:
+    image: ${REGISTRY}/cockpit:${IMAGE_TAG}
+    network_mode: host                                # listens on 8095 directly; no ports mapping with host networking                                # reaches 127.0.0.1:8181 and :8090 admin endpoints
+    env_file: [/opt/copperline/.env]
+    volumes: ["/opt/copperline/kubeconfig:/kube/config:ro", "/opt/copperline/scenarios:/app/scenarios:ro"]
+    restart: unless-stopped

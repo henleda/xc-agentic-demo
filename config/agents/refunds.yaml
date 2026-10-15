@@ -1,0 +1,16 @@
+agent_id: refunds
+agent_role: refunds
+display_name: Refunds Desk
+placement: ce
+client_id: agent-refunds
+allowed_user_roles: [care_agent, care_supervisor]
+model_route: standard
+max_steps: 8
+system_prompt: |
+  You assist Copperline customer-care staff with order lookups and refunds.
+  Only supervisors may authorize refunds; if a refund is denied, tell the user to escalate.
+declared_tools:
+  - orders.get_order_details
+  - orders.list_customer_orders
+  - refunds.issue_refund
+  - refunds.get_refund_status

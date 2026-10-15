@@ -1,0 +1,21 @@
+defaults:
+  port: 8080
+  health_check: { name: hc-healthz, path: /healthz, interval_s: 10, healthy: 2, unhealthy: 3 }
+  outlier_detection: default
+  circuit_breaker: { max_pending_requests: 100 }
+
+k8s_service_pools:                     # origin type: "K8s Service Name of Origin Server on given Sites"; network: vK8s networks on site
+  - { name: op-shopper,       service: svc-shopper-agent.agentic-demo,  virtual_site: vs-re-agents }
+  - { name: op-storeops,      service: svc-storeops-agent.agentic-demo, virtual_site: vs-ce-aws }
+  - { name: op-refunds,       service: svc-refunds-agent.agentic-demo,  virtual_site: vs-ce-aws }
+  - { name: op-mcp-catalog,   service: svc-mcp-catalog.agentic-demo,    virtual_site: vs-re-agents }
+  - { name: op-mcp-orders,    service: svc-mcp-orders.agentic-demo,     virtual_site: vs-ce-aws }
+  - { name: op-mcp-inventory, service: svc-mcp-inventory.agentic-demo,  virtual_site: vs-ce-aws }
+  - { name: op-mcp-refunds,   service: svc-mcp-refunds.agentic-demo,    virtual_site: vs-ce-aws }
+  - { name: op-idp,           service: svc-idp.agentic-demo,            virtual_site: vs-ce-aws }
+  - { name: op-partner-api,   service: svc-partner-api.agentic-demo,    virtual_site: vs-ce-aws }
+
+ip_pools:                              # origin type: "IP address of origin server on given sites"; site network: inside
+  - { name: op-erp,     ip: "${CORE_EC2_PRIVATE_IP}", port: 8081, site: copperline-aws-ce }
+  - { name: op-aigw,    ip: "${CORE_EC2_PRIVATE_IP}", port: 8090, site: copperline-aws-ce }
+  - { name: op-cockpit, ip: "${CORE_EC2_PRIVATE_IP}", port: 8095, site: copperline-aws-ce }

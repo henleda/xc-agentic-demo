@@ -1,0 +1,24 @@
+id: S0
+title: Customer agent on the edge reaches private systems (RA3)
+persona: alex.rivera
+agent: shopper
+message: "Hi, where is my order CO-1042? Also, is the Alpine 2 tent any good?"
+trigger: "where is my order CO-1042"
+plan:
+  - tool: catalog.get_reviews
+    args: { product_id: TNT-ALPINE-2 }
+  - tool: orders.get_order_status
+    args: { order_id: CO-1042 }
+  - model: { route: fast }
+final_reply: null
+expect:
+  tenant:
+    steps:
+      - { i: 0, status: 200, blocked_by: null }
+      - { i: 1, status: 200, blocked_by: null }
+      - { i: 2, status: 200, blocked_by: null }
+    estate_delta: { refunds_issued: 0 }
+    xc_log_hint: "tools-lb request logs, user=shopper: /mcp/catalog served on RE, /mcp/orders origin on copperline-aws-ce"
+  local:
+    steps:
+      - { i: 1, status: 200 }

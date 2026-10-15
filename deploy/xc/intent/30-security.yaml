@@ -1,0 +1,44 @@
+app_firewalls:
+  - name: waf-agents
+    mode: blocking
+    detection: default_signatures_high_medium_accuracy
+    ai_risk_based_blocking: true      # verify: availability in tenant
+    staging: false
+    allowed_content_types: [application/json, application/x-www-form-urlencoded]   # form needed for /auth/token and /token/exchange
+
+rate_limiter_policies:
+  - name: rl-tools
+    count_by: uid-jwt-agent
+    rules:
+      - { match: { header: { Mcp-Name: adjust_stock } }, limit: { requests: 10, per: minute } }   # S4
+      - { match: any, limit: { requests: 60, per: minute } }
+
+service_policies_static:              # hand-maintained (small); tools/llm policies are generated
+  - name: sp-ops
+    rules:
+      - { action: allow, method: POST, path_exact: /auth/demo-login }
+      - { action: allow, path_prefix: /.well-known/ }
+      - { action: allow, path_prefix: /storeops/, jwt_claims: { role: [store_associate] } }
+      - { action: allow, path_prefix: /refunds/,  jwt_claims: { role: [care_agent, care_supervisor] } }
+      - { action: deny,  match: any }
+  - name: sp-idp
+    rules:
+      - { action: allow, method: POST, path_exact: /token/exchange }
+      - { action: allow, method: POST, path_exact: /auth/token }
+      - { action: allow, method: GET,  path_prefix: /.well-known/ }
+      - { action: deny,  match: any }
+  - name: sp-erp
+    rules:
+      - { action: deny,  path_prefix: /admin/ }
+      - { action: allow, jwt_claims: { svc_role: [tool-server] } }
+      - { action: deny,  match: any }
+  - name: sp-cockpit
+    rules:
+      - { action: allow, source_ip_prefixes: "${PRESENTER_CIDRS}" }
+      - { action: deny,  match: any }
+
+api_definitions:
+  - { name: apidef-mcp,     openapi: ../openapi/mcp-tools.yaml }
+  - { name: apidef-partner, openapi: ../openapi/partner-api.yaml }
+
+data_guard: { requires: waf-agents }  # R12

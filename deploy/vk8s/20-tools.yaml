@@ -1,0 +1,311 @@
+# MCP tool servers: catalog on RE (public data, TODO(verify-xc) flavor names), the rest on CE beside the ERP.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-catalog
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-re-agents
+    ves.io/workload-flavor: ves-io-small
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-catalog
+  template:
+    metadata:
+      labels:
+        app: mcp-catalog
+        tier: tool
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/mcp-servers:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MCP_SERVER
+          value: catalog
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-mcp-catalog
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-re-agents
+spec:
+  selector:
+    app: mcp-catalog
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-orders
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-orders
+  template:
+    metadata:
+      labels:
+        app: mcp-orders
+        tier: tool
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/mcp-servers:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MCP_SERVER
+          value: orders
+        - name: SVC_CLIENT_ID
+          value: svc-mcp
+        - name: SVC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: svc-mcp
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-mcp-orders
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: mcp-orders
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-inventory
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-inventory
+  template:
+    metadata:
+      labels:
+        app: mcp-inventory
+        tier: tool
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/mcp-servers:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MCP_SERVER
+          value: inventory
+        - name: SVC_CLIENT_ID
+          value: svc-mcp
+        - name: SVC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: svc-mcp
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-mcp-inventory
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: mcp-inventory
+  ports:
+  - port: 8080
+    targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-refunds
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-refunds
+  template:
+    metadata:
+      labels:
+        app: mcp-refunds
+        tier: tool
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 0
+      containers:
+      - name: app
+        image: ${REGISTRY}/mcp-servers:${IMAGE_TAG}
+        ports:
+        - containerPort: 8080
+        env:
+        - name: MCP_SERVER
+          value: refunds
+        - name: SVC_CLIENT_ID
+          value: svc-mcp
+        - name: SVC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: agent-credentials
+              key: svc-mcp
+        envFrom:
+        - configMapRef:
+            name: runtime-env
+        volumeMounts:
+        - name: cfg
+          mountPath: /config
+        - name: tmp
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      volumes:
+      - name: cfg
+        configMap:
+          name: agent-configs
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-mcp-refunds
+  annotations:
+    ves.io/virtual-sites: agentic-demo/vs-ce-aws
+spec:
+  selector:
+    app: mcp-refunds
+  ports:
+  - port: 8080
+    targetPort: 8080

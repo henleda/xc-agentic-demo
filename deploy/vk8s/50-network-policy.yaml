@@ -1,0 +1,20 @@
+# Default-deny egress for batch pods on the CE (scenario S5).
+# TODO(verify-xc): vK8s accepts network policy as an XC object ("vK8s network policy", L3/L4) — confirm whether a
+# standard K8s NetworkPolicy is honored. If not, configure the equivalent in the XC console and record it in
+# deploy/xc/MANUAL_STEPS.md. Internal LB VIPs on the vK8s service network must remain reachable.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-batch-egress
+  annotations: { ves.io/virtual-sites: "agentic-demo/vs-ce-aws" }
+spec:
+  podSelector: { matchLabels: { tier: batch } }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: "${INTERNAL_LB_VIP_CIDR}" }   # REQUIRED: the vK8s service-network VIP range for idp/tools/llm on the CE (record in docs/08)
+      ports:
+        - { protocol: TCP, port: 80 }
+    - ports:                     # DNS
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }

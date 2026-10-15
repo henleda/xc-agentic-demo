@@ -1,0 +1,16 @@
+# Tool schemas (MCP inputSchema). Shared by mcp-servers and agent-runtime.
+catalog:
+  search_products: { description: Search the public catalog, input: { query: string, limit: integer } }
+  get_product:     { description: Get one product, input: { product_id: string } }
+  get_reviews:     { description: Get customer reviews for a product, input: { product_id: string } }
+orders:
+  get_order_status:     { description: "Order status (masked; no PII)", input: { order_id: string } }
+  get_order_details:    { description: "Full order incl. payment and contact (PII)", input: { order_id: string } }
+  list_customer_orders: { description: "All orders for a customer, or all customers if customer_id='*'", input: { customer_id: string } }
+inventory:
+  check_stock:    { description: Stock for a SKU at a store or all stores, input: { sku: string, store_id: string } }
+  adjust_stock:   { description: Set stock delta at one store, input: { sku: string, store_id: string, delta: integer, reason: string } }
+  transfer_stock: { description: Move stock between stores, input: { sku: string, from_store: string, to_store: string, qty: integer } }
+refunds:
+  issue_refund:      { description: Issue a refund to the original payment method, input: { order_id: string, amount: number, reason: string } }
+  get_refund_status: { description: Refund status, input: { refund_id: string } }

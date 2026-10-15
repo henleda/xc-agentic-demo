@@ -1,0 +1,26 @@
+id: S6
+title: Third-party agent drifts out of scope
+persona: partner:granite-supply
+agent: none
+message: "(cockpit Partner tab)"
+trigger: ".*"
+plan:
+  - token: { grant: client_credentials, client_id: granite-supply, audience: copperline-partner, save_as: partner_tok }
+  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/purchase-orders", auth: partner_tok }
+  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/internal/cost-sheet", auth: partner_tok }
+  - http: { method: POST, url: "https://partner.${DEMO_DOMAIN}/v1/asn", auth: partner_tok,
+            body: { po_id: "PO-5531' OR '1'='1", carrier: "UPS", items: [] } }
+  - http: { method: GET, url: "https://partner.${DEMO_DOMAIN}/v1/purchase-orders?page={n}", auth: partner_tok }
+    repeat: 50                  # n is 1-based (1..50); OpenAPI allows page 1..100
+    concurrency: 10             # finish inside the 10 s rate-limit window
+expect:
+  tenant:
+    steps:
+      - { i: 1, status: 200 }
+      - { i: 2, status: 403, blocked_by: xc }          # OpenAPI fall-through block
+      - { i: 3, status: 403, blocked_by: xc }          # WAF
+      - { i_range: [4, 53], status: 429, blocked_by: xc, min_count: 20 }   # 50 reads; ~30 should 429
+    xc_log_hint: "partner-lb API inventory: /v1/internal/cost-sheet marked shadow + sensitive"
+  local:
+    steps:
+      - { i: 1, status: 200 }

@@ -1,0 +1,32 @@
+namespace: agentic-demo
+
+aws_vpc_site:
+  name: copperline-aws-ce
+  verify: true                         # R1: AWS VPC site (App Stack) vs Secure Mesh Site v2
+  cloud_credentials: "${XC_AWS_CRED_NAME}"
+  region: "${AWS_REGION}"
+  vpc_id: "${AWS_VPC_ID}"                # existing VPC from deploy/aws
+  site_type: app_stack_cluster        # verify: two-interface (outside + inside) App Stack mode; origin pools use the INSIDE network
+  instance_type: m5.2xlarge
+  disk_gb: 100
+  nodes: 1
+  subnets: { outside: "${AWS_SUBNET_CE_OUTSIDE}", inside: "${AWS_SUBNET_CE_INSIDE}" }
+  labels: { copperline.demo/site: aws-ce }
+
+virtual_sites:
+  - name: vs-ce-aws
+    site_type: CUSTOMER_EDGE
+    selector: "copperline.demo/site in (aws-ce)"
+  - name: vs-re-agents
+    site_type: REGIONAL_EDGE
+    selector: "${XC_RE_SELECTOR}"        # verify: true — e.g. ves.io/siteName in (ves-io-ny8-nyc, ves-io-sj10-sjc, ves-io-fr4-fra)
+
+virtual_k8s:
+  name: agentic-demo-vk8s
+  virtual_sites: [vs-re-agents, vs-ce-aws]
+  service_isolation: false
+
+secrets:
+  - name: aigw-api-key
+    type: blindfold                    # see ../MANUAL_STEPS.md (vesctl blindfold encrypt)
+    value_from_env: GATEWAY_API_KEY

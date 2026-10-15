@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Copperline Partner API (published to Granite Supply)
+  version: "1.0"
+  description: >
+    Uploaded to XC as apidef-partner. partner-api ALSO implements GET /v1/internal/cost-sheet and
+    GET /v1/internal/margins, which are deliberately NOT documented here (shadow endpoints for S6).
+paths:
+  /v1/purchase-orders:
+    get:
+      operationId: listPurchaseOrders
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: status, in: query, schema: { type: string, enum: [open, shipped, closed] } }
+      responses: { "200": { description: Page of POs, content: { application/json: { schema: { type: object } } } } }
+  /v1/purchase-orders/{po_id}:
+    get:
+      operationId: getPurchaseOrder
+      parameters: [{ name: po_id, in: path, required: true, schema: { type: string, pattern: "^PO-[0-9]{4}$" } }]
+      responses: { "200": { description: One PO, content: { application/json: { schema: { type: object } } } } }
+  /v1/asn:
+    post:
+      operationId: submitAdvanceShipNotice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [po_id, carrier, items]
+              properties:
+                po_id: { type: string }      # deliberately loose so the S6(c) SQLi reaches the WAF, not schema validation
+                carrier: { type: string, maxLength: 32 }
+                items: { type: array, items: { type: object } }
+      responses: { "202": { description: Accepted } }
+security: [{ bearer: [] }]
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }

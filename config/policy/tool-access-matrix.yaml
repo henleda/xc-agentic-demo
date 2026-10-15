@@ -1,0 +1,73 @@
+# SOURCE OF TRUTH for agent -> tool and agent -> model-route authorization.
+# scripts/gen_policy.py renders deploy/xc/intent/service-policies.generated.yaml from this file
+# and checks config/agents/*.yaml against it. Do not hand-edit generated files.
+
+version: 1
+
+tool_servers:
+  catalog:   { path: /mcp/catalog,   placement: re, k8s_service: svc-mcp-catalog }
+  orders:    { path: /mcp/orders,    placement: ce, k8s_service: svc-mcp-orders }
+  inventory: { path: /mcp/inventory, placement: ce, k8s_service: svc-mcp-inventory }
+  refunds:   { path: /mcp/refunds,   placement: ce, k8s_service: svc-mcp-refunds }
+
+tools:
+  catalog.search_products:      { risk: read-public }
+  catalog.get_product:          { risk: read-public }
+  catalog.get_reviews:          { risk: read-public }      # contains the poisoned review (S1)
+  orders.get_order_status:      { risk: read-masked }
+  orders.get_order_details:     { risk: read-pii }         # returns card number + email (S2 / Data Guard)
+  orders.list_customer_orders:  { risk: read-pii-bulk }    # target of the shadow agent (S5)
+  inventory.check_stock:        { risk: read-internal }
+  inventory.adjust_stock:       { risk: write }            # runaway loop (S4)
+  inventory.transfer_stock:     { risk: write }
+  refunds.issue_refund:         { risk: money-movement }   # S1 / S3
+  refunds.get_refund_status:    { risk: read-internal }
+
+# Generator rule: EVERY allow rule also requires obo_role in the agent's allowed_user_roles,
+# so machine-mode tokens (obo_role=none) are denied unless an agent lists "none" explicitly.
+agents:
+  shopper:
+    agent_role: shopper
+    placement: re
+    allowed_user_roles: [customer]
+    model_routes: [fast]
+    tools:
+      - catalog.search_products
+      - catalog.get_product
+      - catalog.get_reviews
+      - orders.get_order_status
+
+  storeops:
+    agent_role: storeops
+    placement: ce
+    allowed_user_roles: [store_associate]
+    model_routes: [fast, standard]
+    tools:
+      - catalog.search_products
+      - catalog.get_product
+      - catalog.get_reviews
+      - inventory.check_stock
+      - inventory.adjust_stock
+      - inventory.transfer_stock
+      - orders.get_order_status
+
+  refunds:
+    agent_role: refunds
+    placement: ce
+    allowed_user_roles: [care_agent, care_supervisor]
+    model_routes: [standard]
+    tools:
+      - orders.get_order_details
+      - orders.list_customer_orders
+      - refunds.get_refund_status
+      - tool: refunds.issue_refund
+        require_obo_roles: [care_supervisor]     # on-behalf-of constraint enforced at XC (S3)
+
+# Rate-limit intents. NOT yet rendered by gen_policy.py: deploy/xc/intent/30-security.yaml (rl-tools) mirrors them by hand.
+# Claude Code: either extend gen_policy.py to render rl-tools, or keep both in sync and add a check.
+rate_limits:
+  tools_default_per_agent_identity: { requests: 60, per: minute }
+  llm_default_per_agent_identity:   { requests: 30, per: minute }
+  overrides:
+    - match: { tool: inventory.adjust_stock }
+      limit: { requests: 10, per: minute }       # S4 trips this in ~10 s

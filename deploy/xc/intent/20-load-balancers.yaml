@@ -1,0 +1,118 @@
+# Advertisement shorthands:
+#   internet            -> advertise on internet (REs), HTTPS auto-cert
+#   re_vk8s             -> advertise_custom: "vK8s Service Network on RE", virtual site vs-re-agents
+#   ce_vk8s             -> advertise_custom: site/virtual site vs-ce-aws, network "vK8s Service Network"   (verify: R4)
+
+jwt_profiles:                          # API protection -> JWT validation; JWKS pasted from deploy/xc/generated/jwks.json
+  shop:    { issuer: "https://idp.copperline.demo", audience: copperline-shop,    action: block }
+  ops:     { issuer: "https://idp.copperline.demo", audience: copperline-ops,     action: block }
+  partner: { issuer: "https://idp.copperline.demo", audience: copperline-partner, action: block }
+  tools:   { issuer: "https://idp.copperline.demo", audience: copperline-tools,   action: block, mandatory_claims: [agent_role, obo_role, agent_id] }
+  llm:     { issuer: "https://idp.copperline.demo", audience: copperline-llm,     action: block, mandatory_claims: [agent_role, obo_role, agent_id] }
+  erp:     { issuer: "https://idp.copperline.demo", audience: copperline-erp,     action: block, mandatory_claims: [svc_role] }
+
+user_identification:
+  - { name: uid-jwt-sub,   rule: { jwt_claim: sub } }
+  - { name: uid-jwt-agent, rule: { jwt_claim: agent_id } }
+
+http_load_balancers:
+  - name: shop-lb
+    domains: ["shop.${DEMO_DOMAIN}"]
+    advertise: internet
+    routes:
+      - { prefix: /v1/chat,      pool: op-shopper }
+      - { path_exact: /auth/demo-login, pool: op-idp }   # only login is public; /auth/token stays internal or partner-only
+      - { prefix: /.well-known/, pool: op-idp }
+    waf: waf-agents
+    jwt: { profile: shop, target_paths: [/v1/chat] }
+    user_identification: uid-jwt-sub
+    malicious_user_detection: true
+    rate_limit: { path: /v1/chat, requests: 30, per: minute }
+
+  - name: ops-lb
+    domains: ["ops.${DEMO_DOMAIN}"]
+    advertise: internet
+    routes:
+      - { prefix: /storeops/v1/chat, pool: op-storeops, prefix_rewrite: /v1/chat }
+      - { prefix: /refunds/v1/chat,  pool: op-refunds,  prefix_rewrite: /v1/chat }
+      - { path_exact: /auth/demo-login,  pool: op-idp }
+      - { prefix: /.well-known/,     pool: op-idp }
+    waf: waf-agents
+    jwt: { profile: ops, target_paths: [/storeops/, /refunds/] }
+    user_identification: uid-jwt-sub
+    service_policies: [sp-ops]
+
+  - name: partner-lb
+    domains: ["partner.${DEMO_DOMAIN}"]
+    advertise: internet
+    routes:
+      - { prefix: /v1/,        pool: op-partner-api }
+      - { prefix: /auth/token, pool: op-idp }
+    waf: waf-agents
+    jwt: { profile: partner, target_paths: [/v1/] }
+    user_identification: uid-jwt-sub
+    api_definition: apidef-partner
+    openapi_validation: { request: block, fall_through: block, scope_path_prefix: /v1/ }   # /auth/token is NOT in the spec; scope validation to /v1/ (verify: R29)
+    api_discovery: true
+    sensitive_data_discovery: true
+    rate_limit: { path: /v1/, requests: 20, per: 10s }
+
+  - name: cockpit-lb
+    domains: ["cockpit.${DEMO_DOMAIN}"]
+    advertise: internet
+    routes: [{ prefix: /, pool: op-cockpit }]
+    service_policies: [sp-cockpit]
+
+  - name: tools-lb
+    domains: [tools.agentic-demo]
+    protocol: http
+    port: 80
+    advertise: [re_vk8s, ce_vk8s]
+    routes:
+      - { prefix: /mcp/catalog,   pool: op-mcp-catalog }
+      - { prefix: /mcp/orders,    pool: op-mcp-orders }
+      - { prefix: /mcp/inventory, pool: op-mcp-inventory }
+      - { prefix: /mcp/refunds,   pool: op-mcp-refunds }
+    jwt: { profile: tools, target_paths: [/] }
+    user_identification: uid-jwt-agent
+    service_policies: [sp-tools]       # GENERATED (service-policies.generated.yaml)
+    rate_limiter_policies: [rl-tools]
+    waf: waf-agents
+    data_guard: [{ path_prefix: /mcp/orders, action: apply }]
+    api_definition: apidef-mcp
+    openapi_validation: { request: block, fall_through: block }
+    api_discovery: true
+    sensitive_data_discovery: true
+
+  - name: llm-lb
+    domains: [llm.agentic-demo]
+    protocol: http
+    port: 80
+    advertise: [re_vk8s, ce_vk8s]
+    routes: [{ prefix: /v1/, pool: op-aigw }]
+    jwt: { profile: llm, target_paths: [/] }
+    user_identification: uid-jwt-agent
+    service_policies: [sp-llm]         # GENERATED
+    rate_limit: { path: /v1/, requests: 30, per: minute }
+    request_headers_to_remove: [x-api-key]
+    request_headers_to_add:
+      - { name: x-api-key, secret: aigw-api-key }   # agents never hold the gateway key (R10)
+
+  - name: idp-lb
+    domains: [idp.agentic-demo]
+    protocol: http
+    port: 80
+    advertise: [re_vk8s, ce_vk8s]
+    routes: [{ prefix: /, pool: op-idp }]
+    service_policies: [sp-idp]
+
+  - name: erp-lb
+    domains: [erp.agentic-demo]
+    protocol: http
+    port: 80
+    advertise: [ce_vk8s]               # CE ONLY — RE workloads must not resolve this (R5)
+    routes: [{ prefix: /, pool: op-erp }]
+    jwt: { profile: erp, target_paths: [/] }
+    service_policies: [sp-erp]
+    waf: waf-agents
+    # No Data Guard here on purpose: mcp-orders must receive the raw PAN so S2 shows masking at the AGENT hop (tools-lb).
