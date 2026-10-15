@@ -1,4 +1,4 @@
-.PHONY: check policy lint test local-up local-down local-scenarios images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+.PHONY: check policy lint test local-up local-down local-scenarios devbox-up devbox-run devbox-ssh devbox-tunnel devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
 
 # All Python runs through uv so everyone gets the same interpreter (3.12, see .python-version) and deps.
 PY := uv run python
@@ -18,6 +18,17 @@ local-down:
 	docker compose -f deploy/local/docker-compose.yaml down -v
 local-scenarios:
 	$(PY) scripts/run_scenario.py --all --env local
+
+devbox-up:                         ## remote dev server (deploy/devbox/README.md)
+	deploy/devbox/devbox.sh up
+devbox-run:                        ## e.g. make devbox-run CMD="make local-up"
+	deploy/devbox/devbox.sh run '$(CMD)'
+devbox-ssh:
+	deploy/devbox/devbox.sh ssh
+devbox-tunnel:
+	deploy/devbox/devbox.sh tunnel
+devbox-destroy:
+	deploy/devbox/devbox.sh destroy
 
 images:                            ## multi-arch build + push; verifies arbitrary-UID run
 	scripts/build_images.sh

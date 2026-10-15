@@ -14,3 +14,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+deploy/devbox/.terraform/
+deploy/devbox/*.tfstate*
+deploy/devbox/.ssh_config
+deploy/devbox/.known_hosts
