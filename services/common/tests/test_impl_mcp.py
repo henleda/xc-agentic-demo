@@ -385,3 +385,47 @@ def test_client_against_real_router():
     assert ok.status == 200 and json.loads(mcp.tool_result_text(ok))["status"] == "shipped"
     assert s1b.status == 400 and mcp.jsonrpc_error_of(s1b)["data"] == {"header": "Mcp-Name"}
     assert s1b.headers["x-copperline-origin"] == "mcp-orders"
+
+
+# --- review follow-ups: routing headers must be unambiguous before authorize runs -----------------------------
+
+
+def _raw_post(client: TestClient, header_list: list[tuple[str, str]], body: dict):
+    # httpx accepts a list of pairs, which is the only way to send the same header twice.
+    pairs = [("Content-Type", "application/json"), ("Authorization", "Bearer t"), *header_list]
+    return client.post("/mcp/orders", content=json.dumps(body), headers=pairs)
+
+
+@pytest.mark.parametrize("dup", ["Mcp-Name", "Mcp-Method", "MCP-Protocol-Version"])
+def test_repeated_routing_header_is_mismatch_before_authorize(dup):
+    recorder = Recorder()
+    client = TestClient(make_app(recorder))
+    base = {"MCP-Protocol-Version": mcp.PROTOCOL_VERSION, "Mcp-Method": "tools/call", "Mcp-Name": "get_order_status"}
+    pairs = list(base.items()) + [(dup, base[dup])]          # same value twice still counts as repeated
+    if dup == "Mcp-Name":
+        pairs = list(base.items()) + [("Mcp-Name", "get_order_details")]   # allowed first, forbidden second
+    resp = _raw_post(client, pairs, call_body("get_order_status"))
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == mcp.HEADER_MISMATCH
+    assert resp.json()["error"]["data"]["header"].lower() == dup.lower()
+    assert recorder.authorize_calls == [] and recorder.handler_calls == []
+
+
+def test_tools_call_without_name_anywhere_is_mismatch_before_authorize():
+    recorder = Recorder()
+    client = TestClient(make_app(recorder))
+    body = rpc("tools/call", {"arguments": {"order_id": "CO-1042"}})       # no params.name
+    resp = client.post("/mcp/orders", json=body, headers=headers("tools/call"))  # no Mcp-Name
+    assert resp.status_code == 400
+    assert resp.json()["error"] == {"code": mcp.HEADER_MISMATCH, "message": "HeaderMismatch",
+                                    "data": {"header": "Mcp-Name"}}
+    assert recorder.authorize_calls == []
+
+
+def test_tools_call_with_header_but_no_body_name_is_mismatch():
+    recorder = Recorder()
+    client = TestClient(make_app(recorder))
+    body = rpc("tools/call", {"arguments": {"order_id": "CO-1042"}})
+    resp = client.post("/mcp/orders", json=body, headers=headers("tools/call", "get_order_status"))
+    assert resp.status_code == 400 and resp.json()["error"]["code"] == mcp.HEADER_MISMATCH
+    assert recorder.authorize_calls == []

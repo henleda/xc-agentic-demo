@@ -130,13 +130,21 @@ def _check_headers(headers, body: dict) -> _Reject | None:
     params = _params_of(body)
     meta = params.get("_meta") if isinstance(params.get("_meta"), dict) else {}
 
+    # A repeated routing header is a mismatch: an LB and this server might each read a different copy.
+    for name in (HEADER_PROTOCOL_VERSION, HEADER_METHOD, HEADER_NAME):
+        if len(headers.getlist(name)) > 1:
+            return _mismatch(name)
+
     version = headers.get(HEADER_PROTOCOL_VERSION)
     if version is None or (META_PROTOCOL_VERSION in meta and meta[META_PROTOCOL_VERSION] != version):
         return _mismatch(HEADER_PROTOCOL_VERSION)
     if headers.get(HEADER_METHOD) != body["method"]:
         return _mismatch(HEADER_METHOD)
-    if body["method"] == METHOD_CALL_TOOL and headers.get(HEADER_NAME) != params.get("name"):
-        return _mismatch(HEADER_NAME)
+    if body["method"] == METHOD_CALL_TOOL:
+        # Both sides must be present and equal; "neither present" is not agreement.
+        header_name, body_name = headers.get(HEADER_NAME), params.get("name")
+        if header_name is None or body_name is None or header_name != body_name:
+            return _mismatch(HEADER_NAME)
     if version not in SUPPORTED_VERSIONS:
         data = {"supported": list(SUPPORTED_VERSIONS), "requested": version}
         return _Reject(400, UNSUPPORTED_PROTOCOL_VERSION, "UnsupportedProtocolVersion", data)

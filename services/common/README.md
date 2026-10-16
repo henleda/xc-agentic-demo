@@ -87,9 +87,10 @@ Authorization: Bearer <agent token>
 | # | Check | On failure |
 |---|---|---|
 | 0 | Body is a JSON object with `"jsonrpc":"2.0"` and a string `method` | 400, `-32700 Parse error` or `-32600 Invalid Request` |
+| 1a | `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` each appear at most once (an LB and this server could otherwise read different copies) | 400, `-32020 HeaderMismatch`, `data: {"header":<the repeated header>}` |
 | 1 | `MCP-Protocol-Version` header is present and, if the body carries `params._meta[…/protocolVersion]`, equals it | 400, `-32020 HeaderMismatch`, `data: {"header":"MCP-Protocol-Version"}` |
 | 2 | `Mcp-Method` equals body `method` | 400, `-32020 HeaderMismatch`, `data: {"header":"Mcp-Method"}` |
-| 3 | For `tools/call`: `Mcp-Name` equals body `params.name` | 400, `-32020 HeaderMismatch`, `data: {"header":"Mcp-Name"}` (S1b) |
+| 3 | For `tools/call`: `Mcp-Name` is present **and** equals body `params.name`, which must also be present (two missing names do not count as agreement) | 400, `-32020 HeaderMismatch`, `data: {"header":"Mcp-Name"}` (S1b) |
 | 4 | Header version is supported (`2026-07-28`) | 400, `-32022 UnsupportedProtocolVersion`, `data: {"supported":[…],"requested":…}` |
 | 5 | The service's `authorize` hook: bearer token valid | 401, `-32001 Unauthorized` |
 | 5 | The service's `authorize` hook: role allowed (defense in depth) | 403, `-32003 Forbidden` |

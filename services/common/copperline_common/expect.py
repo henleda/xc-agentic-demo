@@ -18,7 +18,7 @@ class Check:
 class ExpectResult:
     ok: bool
     checks: list[Check]
-    skipped: bool  # the block was empty or missing (ok is then False)
+    skipped: bool  # block has no steps / estate_delta / front_door (missing, empty, or soft-only); ok is then False
 
 
 def select_block(expect: dict | None, env: str) -> dict | None:
