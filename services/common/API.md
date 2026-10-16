@@ -133,6 +133,8 @@ def validate_args(tool: ToolDef, args: dict) -> str | None   # None if ok, else 
 
 The shorthand maps `string` to `{"type":"string"}`, and does the same for `integer`, `number` and `boolean`. A trailing `?` makes the argument optional; all others go in `required`. Every schema is `{"type":"object","properties":{…},"required":[…],"additionalProperties":false}`.
 
+In `tools.yaml`, an optional type inside a flow mapping (`{ … }`) **must be quoted**, as in `limit: "integer?"`. YAML reserves `?` in flow context, so PyYAML's pure-Python `SafeLoader` and Ruby's Psych reject an unquoted `integer?`. libyaml's `CSafeLoader` happens to accept it, so a file can look fine in one tool and still crash `load_tools()`. Block style (`limit: integer?` on its own line) needs no quotes. `load_tools` does not work around a file that won't parse: the parse error propagates and the service fails at startup.
+
 `validate_args` checks required keys, unknown keys and basic types. An `integer` must be an int and not a bool; a `number` may be an int or float but not a bool.
 
 ## mcp.py
@@ -332,7 +334,7 @@ async def run_plan(scenario: Scenario, ctx: ExecContext, *, start_n: int = 1) ->
 - **`model` step.**
   - POSTs `${llm_base_url}/v1/converse` with the token `"aud:copperline-llm"`.
   - Headers: `x-model-route: <spec.model.route>` and `x-demo-scenario: <scenario.id>`, plus `x-agent-id` and `x-obo-sub` when known.
-  - Body: `{"system": ctx.system_prompt, "messages": chat_to_converse(ctx.conversation + [summary]), "max_tokens": 400}`. The summary is one user message: "Results of the tool calls you made:" followed by one line per earlier tool step, `- <fq tool> -> <status>: <first 1500 chars of result_preview or model_feedback(...)>`.
+  - Body: `{"system": ctx.system_prompt, "messages": chat_to_converse(ctx.conversation + [summary]), "max_tokens": 400}`. The summary is one user message: "Results of the tool calls you made:" followed by one line per earlier tool step, `- <fq tool> -> <status>: <first 1500 chars of result_preview or model_feedback(...)>`. Use `model_feedback(...)` whenever the step has a `blocked_by`, even if a raw body such as "Forbidden" exists, so a denial reads "denied by policy (HTTP 403)" (scenarios/README.md). Use the preview only for unblocked steps. A missing status prints as `no response`. With no earlier tool steps there is no summary message and `"system"` is left out when `system_prompt` is `None`.
   - No `tools` are sent.
   - `result_preview` is the reply text.
 - **`http` step.**
@@ -358,7 +360,7 @@ class Check:
     ok: bool; description: str; detail: str
 @dataclass
 class ExpectResult:
-    ok: bool; checks: list[Check]; skipped: bool         # skipped = expect block empty or missing (ok=False)
+    ok: bool; checks: list[Check]; skipped: bool         # skipped = no steps/estate_delta/front_door (soft/xc_log_hint alone don't count); ok=False
 def select_block(expect: dict | None, env: str) -> dict | None     # expect.get(env)
 def evaluate(block: dict | None, trace: list[dict], *, estate_delta: dict | None = None) -> ExpectResult
 ```

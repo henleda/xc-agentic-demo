@@ -27,7 +27,7 @@ The official MCP Python SDK (`mcp` 2.3.0) implements 2026-07-28. We still use ou
 | `tool_schemas.py` | `load_tools()` turns `config/tools/tools.yaml` shorthand into JSON Schema; also `validate_args()` and the model-facing tool names |
 | `mcp.py` | MCP 2026-07-28 stateless server (`mcp_router`) and client (`McpClient`) |
 | `converse.py` | Helpers for the Bedrock Converse message shape the AI gateway accepts |
-| `xcblock.py` | `classify(result, via_lb)` returns `(blocked_by, reason)`; `model_feedback(step)` |
+| `xcblock.py` | `classify(result, via_lb)` returns `(blocked_by, reason)`; `model_feedback(kind, status, blocked_by, reason)` |
 | `tokens.py` | `TokenStore` plus the `client_credentials()` and `exchange()` calls to the IdP |
 | `scenarios.py` | Load `scenarios/*.yaml`, match triggers, and expand plans: `${VAR}` first, then `repeat`/`{n}` |
 | `plan_executor.py` | `run_plan()`: the **only** implementation of scenario plans (agent-runtime, cockpit, run_scenario) |
@@ -54,6 +54,8 @@ These are seeded heuristics. Replace them with the real samples in docs/08 durin
 | No origin header, `via_lb=True`, 4xx | `xc` (the fabric or the local-gateway stand-in answered) |
 | No origin header, `via_lb=True`, 5xx | `network` (upstream unreachable behind the LB) |
 | `via_lb=False` (a URL that is not one of our LBs), any status | `null` |
+
+**The first matching row wins.** So a non-LB URL that never answers is `network` (S5's exfil step expects `status: null, blocked_by: network`), and a non-LB 4xx that carries `x-copperline-origin` is `server`. The last row only covers responses from servers that are not ours.
 
 The `reason` text distinguishes the cases. `local-gateway (NOT XC): …` comes from bodies carrying `x-local-gateway`. `waf` comes from the XC WAF block page signature, `rate limited` from 429, `jwt validation` from 401, and `service policy` from other 403s.
 
