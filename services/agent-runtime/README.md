@@ -8,6 +8,7 @@ One image runs three Deployments (shopper, storeops, refunds) and the insights-n
 |---|---|
 | `AGENT_CONFIG` | Path to the agent YAML |
 | `AGENT_CLIENT_SECRET` | Client secret for the agent's `client_id` |
+| `<CLIENT_ID>_SECRET` | Read by scenario `token` steps through `credentials.client_secret(client_id)`, e.g. `AGENT_STOREOPS_SECRET` for `agent-storeops`. Batch mode needs it, so `deploy/vk8s/40-insights-cronjob.yaml` sets `AGENT_STOREOPS_SECRET` as well as `AGENT_CLIENT_SECRET`, both from the same copied Secret key. Without it the IdP answers 401 `invalid_client` and S5 fails at `i=0` |
 | `TOOLS_BASE_URL`, `LLM_BASE_URL`, `IDP_BASE_URL` | Internal LB URLs |
 | `MCP_PROTOCOL_VERSION` | `2026-07-28` |
 | `DEMO_SAFE_MODE` | Run scenario plans when a trigger matches |

@@ -30,6 +30,10 @@ spec:
                 - { name: MODE, value: batch }
                 - name: AGENT_CLIENT_SECRET
                   valueFrom: { secretKeyRef: { name: agent-credentials, key: agent-storeops } }   # the copied secret
+                # S5's token steps (plan_executor) read the secret as credentials.client_secret("agent-storeops"),
+                # i.e. AGENT_STOREOPS_SECRET. Without it the IdP answers 401 invalid_client and S5 i=0/i=1 fail.
+                - name: AGENT_STOREOPS_SECRET
+                  valueFrom: { secretKeyRef: { name: agent-credentials, key: agent-storeops } }   # same copied secret
                 - { name: TRACE_SINK, value: "stdout" }   # batch traces: JSON to stdout; cockpit reads them via kubectl logs (see services/agent-runtime/README.md)
               envFrom: [{ configMapRef: { name: runtime-env } }]
               volumeMounts: [{ name: cfg, mountPath: /config }, { name: tmp, mountPath: /tmp }]
