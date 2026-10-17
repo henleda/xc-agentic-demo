@@ -240,6 +240,22 @@ def test_network_failure_is_data_and_http_body_sent():
     assert request.headers["x-request-id"] == step.request_id
 
 
+def test_decoding_error_mid_plan_is_data_and_the_plan_continues():
+    def handler(request):
+        if request.url.path == "/bad":
+            return httpx.Response(200, headers={"content-encoding": "gzip"}, text="<html>not gzip</html>")
+        return httpx.Response(200, json={"ok": True})
+
+    seen = []
+    plan = [{"http": {"method": "GET", "url": "http://p/good"}},
+            {"http": {"method": "POST", "url": "http://p/bad", "body": {"rows": 200}}},
+            {"http": {"method": "GET", "url": "http://p/good"}}]
+    outcome = run(scenario(plan), Fabric(handler), lb_base_urls=(), step_hook=seen.append)
+    assert [s.status for s in outcome.steps] == [200, None, 200] and seen == outcome.steps
+    bad = outcome.steps[1]
+    assert bad.blocked_by == "network" and bad.reason.startswith("DecodingError: ")
+
+
 def test_previews_are_capped():
     big = "x" * (PREVIEW_LIMIT + 10)
     fabric = Fabric(lambda r: mcp_ok(big))

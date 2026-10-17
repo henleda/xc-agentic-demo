@@ -63,12 +63,13 @@ class HttpResult:
     body_text: str
     json: Any | None                      # parsed body if it is valid JSON, else None
     latency_ms: int
-    error: str | None = None              # "connect_error: …", "dns: …", "timeout", … when status is None
+    error: str | None = None              # "connect_error: …", "dns: …", "timeout", "invalid_url: …", "<ExcType>: …" when status is None
 
 def new_http_client(timeout: float = 10.0, **kwargs) -> httpx.AsyncClient
     # event hook adds x-request-id (current_request_id()) to every request unless already set
 async def send(client: httpx.AsyncClient, method: str, url: str, *, retry_connect_once: bool = False, **kwargs) -> HttpResult
-    # never raises for HTTP status or transport errors; returns status=None + error on transport failure.
+    # never raises for HTTP status, any httpx.HTTPError (transport, DecodingError, TooManyRedirects, …) or InvalidURL;
+    # returns status=None + error instead ("<ExcType>: <message>" for errors that are not timeout/connect/dns).
     # retry_connect_once: retry exactly once on httpx.ConnectError (not on timeouts)
 ```
 
@@ -274,7 +275,8 @@ def by_id(scenarios, scenario_id: str) -> Scenario | None
 def substitute_env(value: Any, env: Mapping[str, str]) -> Any
     # recursively replaces ${NAME} in strings; missing or empty NAME → PlanError("unresolved ${NAME}")
 def substitute_n(value: Any, n: int) -> Any
-    # recursively replaces only {n} and {n:<format_spec>} (e.g. {n:03d}) in strings; other braces untouched
+    # recursively replaces only {n} and {n:<format_spec>} (e.g. {n:03d}) in strings; other braces untouched;
+    # a spec that cannot format an int (e.g. {n:03s}) → PlanError("bad {n} format spec '03s': …")
 def expand_plan(plan: list[dict], env: Mapping[str, str]) -> list[PlanStep]
     # for each source step: substitute_env first; then if repeat=R expand to R steps with n=1..R and substitute_n
     # (args_template becomes args); validates exactly one of model/tool/http/token → PlanError otherwise
@@ -367,7 +369,7 @@ def evaluate(block: dict | None, trace: list[dict], *, estate_delta: dict | None
 
 The semantics are those in `scenarios/README.md` under "Assertion semantics", plus four details:
 
-- **Step matching.** A step matches a spec when every key present among `status`, `blocked_by` and `is_error` equals the step's value. If `status == 200` and the step kind is `tool`, `is_error` must also be falsy.
+- **Step matching.** A step matches a spec when every key present among `status`, `blocked_by` and `is_error` equals the step's value. If `status == 200` and the step kind is `tool`, `is_error` must also be `false` (a parsed MCP result with `isError: false`). `is_error: null` means no MCP result came back (an HTML block page, an empty body, a JSON-RPC error), so the check fails with "status 200 but no MCP result".
 - **Estate.**
   - `estate_delta: {k: v}` compares against the observed `estate_delta[k]`, allowing ± `tolerance[k]` (default 0).
   - If `estate_delta` was expected but no observation was passed in, that is a failed check: "estate not observed".

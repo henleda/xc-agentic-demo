@@ -1,8 +1,16 @@
+import asyncio
+
+import httpx
 import pytest
 from copperline_common.expect import evaluate, select_block
+from copperline_common.plan_executor import ExecContext, run_plan
+from copperline_common.scenarios import by_id, load_scenarios
 
 
-def step(i, status, kind="tool", blocked_by=None, is_error=None, preview=None, truncated=False) -> dict:
+def step(i, status, kind="tool", blocked_by=None, is_error=..., preview=None, truncated=False) -> dict:
+    """A trace row. By default a 200 tool row carries is_error=False, as a parsed MCP result would."""
+    if is_error is ...:
+        is_error = False if (kind == "tool" and status == 200) else None
     return {"n": i + 1, "i": i, "kind": kind, "status": status, "blocked_by": blocked_by, "is_error": is_error,
             "result_preview": preview, "result_truncated": truncated}
 
@@ -26,6 +34,16 @@ def test_single_steps_and_blocked_by_null():
 def test_status_200_tool_requires_no_is_error():
     assert not evaluate({"steps": [{"i": 0, "status": 200}]}, [step(0, 200, is_error=True)]).ok
     assert evaluate({"steps": [{"i": 0, "status": 200}]}, [step(0, 200, kind="http", is_error=True)]).ok
+
+
+def test_status_200_tool_without_an_mcp_result_fails():
+    """HTTP 200 with no parsed MCP result (HTML block page, empty body, JSON-RPC error) is not a tool success."""
+    no_result = step(0, 200, is_error=None, preview="<html>Request Rejected. Your support ID is 123</html>")
+    result = evaluate({"steps": [{"i": 0, "status": 200, "blocked_by": None}]}, [no_result])
+    assert not result.ok and result.checks[0].detail == "status 200 but no MCP result"
+    assert not evaluate({"steps": [{"i_range": [0, 0], "status": 200, "min_count": 1}]}, [no_result]).ok
+    assert evaluate({"steps": [{"i": 0, "status": 200}]}, [step(0, 200, is_error=False)]).ok
+    assert evaluate({"steps": [{"i": 0, "status": 200}]}, [step(0, 200, kind="model", is_error=None)]).ok
 
 
 def test_status_null_means_no_response():
@@ -103,3 +121,36 @@ def test_front_door_and_soft():
 def test_empty_block_is_skipped_not_passed(block):
     result = evaluate(block, [step(0, 200)])
     assert result.skipped is True and result.ok is False
+
+
+@pytest.mark.parametrize(
+    "mcp_body",
+    [
+        "<html>Request Rejected. The requested URL was rejected. Your support ID is: 123</html>",
+        "",
+        '{"jsonrpc": "2.0", "id": "1", "error": {"code": -32603, "message": "boom"}}',
+    ],
+    ids=["html-block-page", "empty-body", "jsonrpc-error"],
+)
+@pytest.mark.parametrize("scenario_id, estate", [("S0", {"refunds_issued": 0}), ("S2", None)])
+def test_real_scenarios_fail_when_tools_return_200_without_an_mcp_result(repo_root, mcp_body, scenario_id, estate):
+    """End to end through run_plan: a 200 from /mcp/* that is not an MCP result must not pass S0 or S2."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/mcp/"):
+            return httpx.Response(200, headers={"x-copperline-origin": "mcp-servers"}, text=mcp_body)
+        body = {"output": {"message": {"role": "assistant", "content": [{"text": "ok"}]}}, "stop_reason": "end_turn"}
+        return httpx.Response(200, headers={"x-copperline-origin": "ai-gw"}, json=body)
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            ctx = ExecContext(http=http, tools_base_url="http://tools", llm_base_url="http://llm", idp_base_url=None,
+                              tokens={"aud:copperline-tools": "t", "aud:copperline-llm": "l"}, env={})
+            return await run_plan(sc, ctx)
+
+    sc = by_id(load_scenarios(repo_root / "scenarios"), scenario_id)
+    outcome = asyncio.run(go())
+    rows = [s.to_dict() for s in outcome.steps]
+    assert any(row["kind"] == "tool" and row["status"] == 200 and row["is_error"] is None for row in rows)
+    result = evaluate(select_block(sc.expect, "tenant"), rows, estate_delta=estate)
+    assert not result.ok
+    assert any(c.detail == "status 200 but no MCP result" for c in result.checks if not c.ok)

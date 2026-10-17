@@ -28,6 +28,16 @@ def test_substitute_n_formats_and_leaves_other_braces():
     assert substitute_n({"a": ["{n}", 5, None], "b": "{n:>4}"}, 9) == {"a": ["9", 5, None], "b": "   9"}
 
 
+def test_bad_n_format_spec_is_a_plan_error():
+    with pytest.raises(PlanError, match=r"bad \{n\} format spec '03s'"):
+        substitute_n("S-{n:03s}", 1)
+    with pytest.raises(PlanError):
+        expand_plan([{"tool": "a.b", "args_template": {"s": "S-{n:03s}"}, "repeat": 2}], {})
+    # Without repeat, {n...} is not substituted at all, so the same text is harmless.
+    (step,) = expand_plan([{"tool": "a.b", "args_template": {"s": "S-{n:03s}"}}], {})
+    assert step.spec["args"] == {"s": "S-{n:03s}"}
+
+
 def test_substitute_env_recursive_and_errors():
     env = {"BASE": "http://x", "EMPTY": ""}
     assert substitute_env({"u": ["${BASE}/a", "{n}"], "k": 1}, env) == {"u": ["http://x/a", "{n}"], "k": 1}

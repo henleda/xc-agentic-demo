@@ -1,4 +1,4 @@
-"""Outbound HTTP that propagates x-request-id and never raises."""
+"""Outbound HTTP that propagates x-request-id and never raises for HTTP or httpx errors."""
 
 import json
 import time
@@ -17,7 +17,7 @@ class HttpResult:
     body_text: str
     json: Any | None  # parsed body if it is valid JSON, else None
     latency_ms: int
-    error: str | None = None  # "connect_error: ...", "dns: ...", "timeout", ... when status is None
+    error: str | None = None  # "connect_error: …", "dns: …", "timeout", "<ExcType>: …" when status is None
 
 
 async def _add_request_id(request: httpx.Request) -> None:
@@ -41,7 +41,9 @@ def _parse_json(text: str) -> Any | None:
         return None
 
 
-def _describe_transport_error(exc: httpx.TransportError) -> str:
+def _describe_error(exc: httpx.HTTPError) -> str:
+    """"timeout", "dns: ...", "connect_error: ...", or "<ExceptionType>: <message>" for anything else
+    (e.g. DecodingError for a body that does not match its content-encoding, TooManyRedirects)."""
     if isinstance(exc, httpx.TimeoutException):
         return "timeout"
     message = str(exc) or type(exc).__name__
@@ -61,15 +63,16 @@ def _elapsed_ms(started_at: float) -> int:
 async def send(
     client: httpx.AsyncClient, method: str, url: str, *, retry_connect_once: bool = False, **kwargs
 ) -> HttpResult:
-    """Send one request. HTTP errors and transport errors come back as an HttpResult, never as exceptions.
+    """Send one request. HTTP status errors and every httpx.HTTPError (transport, decoding, redirects, ...)
+    come back as an HttpResult, never as exceptions. No response means status=None plus error.
 
     retry_connect_once retries exactly once on httpx.ConnectError (never on a timeout).
     """
     started_at = time.monotonic()
     try:
         response = await _request(client, method, url, retry_connect_once, **kwargs)
-    except httpx.TransportError as exc:
-        error = _describe_transport_error(exc)
+    except httpx.HTTPError as exc:
+        error = _describe_error(exc)
     except httpx.InvalidURL as exc:
         error = f"invalid_url: {exc}"
     else:
