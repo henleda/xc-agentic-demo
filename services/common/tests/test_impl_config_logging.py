@@ -87,3 +87,19 @@ def test_setup_logging_is_idempotent_and_reads_level(monkeypatch, read_logs):
     events = [line.get("event") for line in read_logs()]
     assert "dropped-info" not in events and "kept-warning" in events
     setup_logging("unit-test", level="info")
+
+
+def test_gateway_key_header_and_cookies_are_redacted_but_usage_counts_are_not():
+    from copperline_common.logging import redact
+
+    out = redact({
+        "headers": {"x-api-key": "GW-KEY", "X-Api-Key": "GW-KEY", "cookie": "c", "authorization": "Bearer a"},
+        "private_key": "pem",
+        "usage": {"inputTokens": 12, "outputTokens": 3, "totalTokens": 15},
+        "max_tokens": 400,
+        "tokens_in": 12,
+    })
+    assert out["headers"] == {"x-api-key": "***", "X-Api-Key": "***", "cookie": "***", "authorization": "***"}
+    assert out["private_key"] == "***"
+    assert out["usage"] == {"inputTokens": 12, "outputTokens": 3, "totalTokens": 15}
+    assert out["max_tokens"] == 400 and out["tokens_in"] == 12

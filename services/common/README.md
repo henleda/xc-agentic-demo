@@ -39,7 +39,7 @@ The official MCP Python SDK (`mcp` 2.3.0) implements 2026-07-28. We still use ou
 - **`x-copperline-origin: <service>`** is set on **every** response, including errors and 500s. This is how `xcblock` tells a block by our own service (`server`) from a block by the fabric (`xc`). `TODO(verify-xc)`: XC passes origin response headers through unchanged (docs/08 R32).
 - **One `http_request` log event per request,** carrying method, path, status and latency. `/healthz` is not logged.
 - **Unhandled exceptions** return `500 {"error":"internal_error"}`, still carrying the origin header, and are logged with a traceback.
-- **Log fields:** `ts`, `service`, `level`, `request_id`, `agent_id`, `obo_sub`, `event`, `status` and `latency_ms` are always present (null when unknown). Extras are added as top-level keys. Values under keys containing `secret`, `token`, `password`, `authorization` or `api_key` are written as `***`.
+- **Log fields:** `ts`, `service`, `level`, `request_id`, `agent_id`, `obo_sub`, `event`, `status` and `latency_ms` are always present (null when unknown). Extras are added as top-level keys. Values under keys containing `secret`, `token`, `password`, `authorization`, `api_key`, `api-key`, `cookie` or `private_key` are written as `***` (LLM usage counters such as `inputTokens` are exempt).
 - **Identity for logs:** `agent_id` and `obo_sub` are read from the bearer token **without verification**, for logs only.
 
 ### `xcblock.classify(result, via_lb)` rules

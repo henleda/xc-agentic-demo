@@ -9,7 +9,9 @@ from typing import Any
 
 from copperline_common.requestid import agent_id_var, obo_sub_var, request_id_var
 
-SENSITIVE_MARKERS = ("secret", "token", "password", "authorization", "api_key")
+SENSITIVE_MARKERS = ("secret", "token", "password", "authorization", "api_key", "api-key", "cookie", "private_key")
+# Keys that contain a marker but only ever hold counts (LLM usage), never credentials.
+NOT_SENSITIVE = ("inputtokens", "outputtokens", "totaltokens", "max_tokens", "tokens_in", "tokens_out", "tokens_total")
 REDACTED = "***"
 
 _service: str | None = None
@@ -19,6 +21,8 @@ _logger = logging.getLogger("copperline")
 
 def is_sensitive(key: str) -> bool:
     lowered = str(key).lower()
+    if lowered in NOT_SENSITIVE:
+        return False
     return any(marker in lowered for marker in SENSITIVE_MARKERS)
 
 

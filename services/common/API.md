@@ -25,7 +25,7 @@ def log_event(event: str, *, level: str = "info", **fields) -> None
 
 Every line carries `ts` (ISO-8601 UTC with milliseconds and a `Z` suffix), `service`, `level`, `request_id`, `agent_id`, `obo_sub`, `event`, `status` and `latency_ms`. Missing values are `null`. `request_id`, `agent_id` and `obo_sub` default to the current context-variable values. Extra fields become top-level keys.
 
-Redaction applies to any key whose lowercased name contains `secret`, `token`, `password`, `authorization` or `api_key`. Its value becomes `"***"`, recursively inside dicts.
+Redaction applies to any key whose lowercased name contains `secret`, `token`, `password`, `authorization`, `api_key`, `api-key`, `cookie` or `private_key`. LLM usage counters (`inputTokens`, `outputTokens`, `totalTokens`, `max_tokens`, `tokens_in`, `tokens_out`, `tokens_total`) are exempt. Its value becomes `"***"`, recursively inside dicts.
 
 ## requestid.py
 
@@ -305,7 +305,7 @@ class ExecContext:
     tokens: dict[str, str]                 # saved tokens by name; also "aud:copperline-tools" / "aud:copperline-llm"
     agent_id: str | None = None
     obo_sub: str | None = None
-    lb_base_urls: tuple[str, ...] = ()     # targets starting with one of these are via_lb=True
+    lb_base_urls: tuple[str, ...] = ()     # extra LB URLs; targets starting with these, or with tools/llm/idp_base_url, are via_lb=True
     conversation: list[dict] = field(default_factory=list)   # chat messages [{"role","content"}]
     system_prompt: str | None = None
     scenario_id: str | None = None

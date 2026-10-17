@@ -117,7 +117,10 @@ def _apply_http(step: Step, result: HttpResult, *, via_lb: bool) -> None:
 
 
 def _via_lb(ctx: ExecContext, url: str) -> bool:
-    return any(url.startswith(base) for base in ctx.lb_base_urls if base)
+    """True when url goes through one of our LBs. The context's own tools/llm/idp URLs always count, so a raw
+    http step to ${TOOLS_BASE_URL} (S5's probe) is classified like any other tools-lb call."""
+    bases = (*ctx.lb_base_urls, ctx.tools_base_url, ctx.llm_base_url, ctx.idp_base_url)
+    return any(url.startswith(base) for base in bases if base)
 
 
 def _identity_headers(ctx: ExecContext, request_id: str) -> dict[str, str]:

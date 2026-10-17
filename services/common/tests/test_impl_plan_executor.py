@@ -281,3 +281,18 @@ def test_plan_errors_before_any_call():
     with pytest.raises(PlanError):
         run(scenario([{"tool": "catalog.get_product"}]), fabric, tools_base_url=None)
     assert fabric.requests == []
+
+
+def test_raw_http_step_to_tools_base_url_counts_as_via_lb_without_listing_it():
+    """S5's probe (GET ${TOOLS_BASE_URL}/mcp/orders/export) must be classified as a fabric block even when the
+    caller did not repeat the tools URL in lb_base_urls."""
+    def handler(request):
+        if request.url.path == "/auth/token":
+            return httpx.Response(200, headers={"x-copperline-origin": "idp"}, json={"access_token": "machine-tok"})
+        return httpx.Response(403, text="denied")  # no x-copperline-origin: the fabric answered
+
+    plan = [{"token": {"grant": "client_credentials", "client_id": "agent-storeops", "audience": "copperline-tools",
+                       "save_as": "tools_tok"}},
+            {"http": {"method": "GET", "url": "${TOOLS_BASE_URL}/mcp/orders/export", "auth": "tools_tok"}}]
+    steps = run(scenario(plan), Fabric(handler), lb_base_urls=(), env={"TOOLS_BASE_URL": TOOLS}).steps
+    assert steps[1].status == 403 and steps[1].blocked_by == "xc"
