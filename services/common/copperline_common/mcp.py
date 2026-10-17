@@ -112,10 +112,15 @@ def _params_of(body: dict) -> dict:
     return params if isinstance(params, dict) else {}
 
 
+def _reject_constant(name: str):
+    """NaN, Infinity and -Infinity are not JSON (RFC 8259); Python's parser accepts them unless told otherwise."""
+    raise ValueError(f"invalid JSON constant {name}")
+
+
 def _check_envelope(raw: bytes) -> tuple[dict | None, _Reject | None]:
     """Check 0: a JSON object with "jsonrpc": "2.0" and a string method."""
     try:
-        body = json.loads(raw)
+        body = json.loads(raw, parse_constant=_reject_constant)
     except ValueError:
         return None, _Reject(400, PARSE_ERROR, "Parse error")
     if not isinstance(body, dict):

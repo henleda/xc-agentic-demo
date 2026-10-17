@@ -38,7 +38,7 @@ XC has already validated the JWT (tools-lb JWT profile) and enforced `sp-tools`.
 3. **Discovery.** For `tools/list` and `server/discover`, allow if the matrix gives `agent_role` any tool on this server **and** `obo_role` is in that agent's `allowed_user_roles`. Otherwise deny with 403.
 4. **`tools/call`.** Find the matrix entry for `agent_role` and fully-qualified tool `<server>.<tool>`. Allow only if it exists **and** `obo_role` is in the entry's `require_obo_roles` (falling back to the agent's `allowed_user_roles`). Otherwise `McpDenied(403, -32003, "Forbidden")`.
 5. **Machine-mode tokens** (`obo_role: "none"`) are denied unless the matrix lists `"none"` explicitly, which it never does.
-6. **Logging.** Every denial is logged as `server_authz_deny`, with `agent_role`, `obo_role`, `tool` and `reason`.
+6. **Logging.** Every denial, 401 and 403 alike, is logged as `server_authz_deny`, with `status`, `agent_role`, `obo_role`, `tool` and `reason`. The token itself is never logged.
 
 The matrix is read from `${CONFIG_DIR}/tool-access-matrix.yaml`, using the same `norm_tool_entry` semantics as `scripts/gen_policy.py` (a plain string, or `{tool, require_obo_roles}`). Keep the two in agreement; a test compares them.
 
@@ -62,7 +62,8 @@ This is the deck's "claim-to-body binding" gap. XC can authorize *which tool* an
   - `client_id` from `SVC_CLIENT_ID` (default `svc-mcp`);
   - `client_secret` from `SVC_CLIENT_SECRET`;
   - `audience` `copperline-erp`.
-- **Caching.** The token is cached until 30 s before `exp`. A 401 from the ERP triggers exactly one refresh and retry. The token is never logged.
+- **Caching.** The token is cached until 30 s before `exp`. One lock serializes IdP calls, so concurrent tool calls share one token instead of stampeding the IdP. A 401 from the ERP triggers exactly one refresh and retry; a second 401 is a 502. The token is never logged.
+- **Paths.** Every argument placed in an ERP URL (`order_id`, `sku`, `refund_id`, `customer_id`, `store_id`) is percent-encoded as a single path segment, so a value like `../admin/state` can't change which ERP route is called. An empty value, `.` or `..` is refused with `ToolError("invalid request: …")` before any ERP call, because quoting leaves those alone and the HTTP client would collapse them. `customer_id: *` is passed through literally, because it is the ERP's "all customers" value.
 - **Client.** Calls use `copperline_common.outbound.new_http_client()`, so `x-request-id` propagates, with a 10 s timeout.
 - **Error mapping.**
 

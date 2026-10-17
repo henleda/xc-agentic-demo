@@ -86,7 +86,7 @@ Authorization: Bearer <agent token>
 
 | # | Check | On failure |
 |---|---|---|
-| 0 | Body is a JSON object with `"jsonrpc":"2.0"` and a string `method` | 400, `-32700 Parse error` or `-32600 Invalid Request` |
+| 0 | Body is a JSON object with `"jsonrpc":"2.0"` and a string `method`. `NaN`, `Infinity` and `-Infinity` are not JSON (RFC 8259) and count as a parse error | 400, `-32700 Parse error` or `-32600 Invalid Request` |
 | 1a | `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` each appear at most once (an LB and this server could otherwise read different copies) | 400, `-32020 HeaderMismatch`, `data: {"header":<the repeated header>}` |
 | 1 | `MCP-Protocol-Version` header is present and, if the body carries `params._meta[…/protocolVersion]`, equals it | 400, `-32020 HeaderMismatch`, `data: {"header":"MCP-Protocol-Version"}` |
 | 2 | `Mcp-Method` equals body `method` | 400, `-32020 HeaderMismatch`, `data: {"header":"Mcp-Method"}` |
@@ -96,7 +96,7 @@ Authorization: Bearer <agent token>
 | 5 | The service's `authorize` hook: role allowed (defense in depth) | 403, `-32003 Forbidden` |
 | 6 | Method is known | 404, `-32601 Method not found` |
 | 7 | `tools/call`: tool exists on this server | 400, `-32602 Invalid params` |
-| 8 | `tools/call`: arguments match the input schema | 200, result with `isError: true` (the model can correct itself) |
+| 8 | `tools/call`: arguments match the input schema. A `number` must be finite (`1e999` parses to infinity) | 200, result with `isError: true` (the model can correct itself) |
 | 9 | The tool handler raises `ToolError` (e.g. "not your order") | 200, result with `isError: true` |
 | 10 | The tool handler raises `UpstreamError` (e.g. ERP down or blocked) | 502, `-32603 Internal error`, `data: {"upstream_status": …}` |
 

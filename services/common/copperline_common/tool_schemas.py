@@ -1,5 +1,6 @@
 """Tool definitions from tools.yaml (shorthand types) turned into MCP / JSON Schema form."""
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,7 +75,7 @@ def _type_ok(value: object, type_name: str) -> bool:
     if type_name == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
     if type_name == "number":
-        return isinstance(value, int | float) and not isinstance(value, bool)
+        return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
     if type_name == "boolean":
         return isinstance(value, bool)
     return True

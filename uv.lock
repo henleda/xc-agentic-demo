@@ -8,6 +8,7 @@ members = [
     "copperline-demo",
     "copperline-erp-mock",
     "copperline-idp",
+    "copperline-mcp-servers",
 ]
 
 [[package]]
@@ -127,6 +128,7 @@ dependencies = [
     { name = "copperline-common" },
     { name = "copperline-erp-mock" },
     { name = "copperline-idp" },
+    { name = "copperline-mcp-servers" },
     { name = "pyyaml" },
 ]
 
@@ -142,6 +144,7 @@ requires-dist = [
     { name = "copperline-common", editable = "services/common" },
     { name = "copperline-erp-mock", editable = "services/erp-mock" },
     { name = "copperline-idp", editable = "services/idp" },
+    { name = "copperline-mcp-servers", editable = "services/mcp-servers" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 
@@ -185,6 +188,25 @@ requires-dist = [
     { name = "copperline-common", editable = "services/common" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "copperline-mcp-servers"
+version = "0.1.0"
+source = { editable = "services/mcp-servers" }
+dependencies = [
+    { name = "copperline-common" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "copperline-common", editable = "services/common" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
