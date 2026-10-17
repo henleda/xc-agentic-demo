@@ -6,6 +6,7 @@ PY := uv run python
 check: policy lint test            ## everything CI runs
 policy:
 	$(PY) scripts/gen_policy.py --check
+	$(PY) scripts/gen_seed_data.py --check
 lint:
 	uv run ruff check services scripts deploy/local
 test:
