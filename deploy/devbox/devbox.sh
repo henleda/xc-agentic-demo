@@ -65,8 +65,11 @@ cmd_up() {
 
 cmd_sync() {
   [ -f "$SSH_CONFIG" ] || write_ssh_config
+  # The keys and secrets are generated ON the box (make local-up) and must never be overwritten or deleted by a
+  # sync from the laptop, so they are excluded: rsync then neither copies nor deletes them.
   rsync -az --delete \
     --exclude .git/ --exclude .venv/ --exclude __pycache__/ --exclude .pytest_cache/ --exclude .ruff_cache/ \
+    --exclude /.secrets/ --exclude /deploy/xc/generated/ --exclude /deploy/local/.run/ \
     --exclude 'deploy/devbox/.terraform/' --exclude 'deploy/devbox/*.tfstate*' \
     --exclude 'deploy/devbox/.ssh_config' --exclude 'deploy/devbox/.known_hosts' \
     -e "ssh -F $SSH_CONFIG" "$ROOT/" "copperline-devbox:$REMOTE_DIR/"

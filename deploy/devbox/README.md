@@ -33,5 +33,6 @@ make devbox-ssh                                        # interactive shell
 make devbox-destroy                                    # delete everything this created
 ```
 
-- `rsync` mirrors the working tree to the box, excluding `.git`, `.venv` and caches. `.env` and `.secrets/` **are** copied, because the services need them. The box is private to you.
+- `rsync` mirrors the working tree to the box, excluding `.git`, `.venv` and caches. `.env` **is** copied. The box is private to you.
+- **Keys and secrets are made on the box, not copied to it.** `.secrets/`, `deploy/xc/generated/` and `deploy/local/.run/` are excluded from the sync, so rsync's `--delete` never removes them. `make local-up` creates them on the box the first time (`gen_keys.py --if-missing`). To use the laptop's secrets instead, copy them once by hand.
 - Terraform state is local, in `deploy/devbox/terraform.tfstate`, and gitignored. Only the person who created the box can update or destroy it this way.
