@@ -1,0 +1,15 @@
+# Local stand-ins for the XC origin pools in deploy/xc/intent/10-origin-pools.yaml: pool name -> URL inside
+# docker compose. The local-gateway (one container per XC load balancer) proxies each route's pool to this URL.
+# Pools whose service is not built yet simply answer 503 from the gateway.
+op-shopper: http://shopper-agent:8080
+op-storeops: http://storeops-agent:8080
+op-refunds: http://refunds-agent:8080
+op-mcp-catalog: http://mcp-catalog:8080
+op-mcp-orders: http://mcp-orders:8080
+op-mcp-inventory: http://mcp-inventory:8080
+op-mcp-refunds: http://mcp-refunds:8080
+op-idp: http://idp:8080
+op-partner-api: http://partner-api:8080
+op-erp: http://erp-mock:8081   # EC2 port, as on copperline-core
+op-aigw: http://ai-gw:8090     # EC2 port
+op-cockpit: http://cockpit:8095

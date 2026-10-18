@@ -1,0 +1,138 @@
+# Local stack (laptop or devbox mode). NOT XC. Start it with `make local-up`, or `deploy/local/compose.sh <args>`.
+# Don't run plain `docker compose` here: the wrapper stages the mounted files and supplies the secrets.
+#
+# Every XC load balancer in deploy/xc/intent/20-load-balancers.yaml (except cockpit-lb) runs as a local-gateway
+# container that reads those intent files. The internal LBs keep their vK8s hostnames (tools.agentic-demo, ...) as
+# network aliases AND listen on port 80 like the XC internal LBs, so services use the exact tenant URLs
+# (http://idp.agentic-demo, no port). Binding 80 as non-root needs ip_unprivileged_port_start=0, set per container
+# below; the gateway is local-only, while every image that goes to vK8s listens on 8080 (CLAUDE.md rule 3).
+# Every container is hardened the way vK8s requires: arbitrary UID with group 0, read-only root filesystem,
+# tmpfs /tmp, no capabilities, no privilege escalation (CLAUDE.md rule 3).
+#
+# Published on 127.0.0.1 only:
+#   front doors   shop-lb 8001   ops-lb 8002   partner-lb 8003
+#   internal LBs  tools-lb 8011  llm-lb 8012   idp-lb 8013   erp-lb 8014   (debugging and tests; not reachable in XC)
+#   erp-mock admin 8181
+name: copperline-local
+
+x-hardened: &hardened
+  user: "1000770000:0"
+  read_only: true
+  tmpfs: ["/tmp"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+x-healthcheck: &healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 5s
+
+x-mcp: &mcp
+  <<: *hardened
+  build: { context: ../.., dockerfile: services/mcp-servers/Dockerfile }
+  image: copperline/mcp-servers:local
+  volumes: ["./.run/config:/config:ro"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+
+x-mcp-erp-env: &mcp-erp-env
+  IDP_BASE_URL: http://idp.agentic-demo
+  ERP_BASE_URL: http://erp.agentic-demo
+  SVC_CLIENT_ID: svc-mcp
+  SVC_CLIENT_SECRET: ${SVC_MCP_SECRET:?run deploy/local/compose.sh, not docker compose}
+
+x-gateway: &gateway
+  <<: *hardened
+  build: { context: ../.., dockerfile: deploy/local/local-gateway/Dockerfile }
+  image: copperline/local-gateway:local
+  volumes: ["./.run/gateway:/gateway:ro", "./.run/keys:/keys:ro"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", 8080)}/__local-gateway/healthz', timeout=2)"]
+
+x-internal-lb-port: &internal-lb-port   # XC internal LBs listen on HTTP 80 (docs/01 "Ports")
+  PORT: "80"
+
+services:
+  # ---- origins -----------------------------------------------------------------------------------------------------
+  idp:
+    <<: *hardened
+    build: { context: ../.., dockerfile: services/idp/Dockerfile }
+    image: copperline/idp:local
+    environment:
+      ISSUER: https://idp.copperline.demo
+      SIGNING_KEY_PEM: ${SIGNING_KEY_PEM:?run deploy/local/compose.sh, not docker compose}
+      CLIENT_SECRETS_JSON: ${CLIENT_SECRETS_JSON:?run deploy/local/compose.sh, not docker compose}
+    volumes: ["./.run/config:/config:ro"]
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+
+  erp-mock:
+    <<: *hardened
+    build: { context: ../.., dockerfile: services/erp-mock/Dockerfile }
+    image: copperline/erp-mock:local
+    environment:
+      ISSUER: https://idp.copperline.demo
+      JWKS_PATH: /keys/jwks.json   # like EC2: a file, not the IdP URL
+    volumes: ["./.run/keys:/keys:ro"]
+    ports: ["127.0.0.1:8181:8181"]  # admin API: loopback only, never through a gateway
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2)"]
+
+  mcp-catalog:
+    <<: *mcp
+    environment: { MCP_SERVER: catalog }
+  mcp-orders:
+    <<: *mcp
+    environment: { <<: *mcp-erp-env, MCP_SERVER: orders }
+  mcp-inventory:
+    <<: *mcp
+    environment: { <<: *mcp-erp-env, MCP_SERVER: inventory }
+  mcp-refunds:
+    <<: *mcp
+    environment: { <<: *mcp-erp-env, MCP_SERVER: refunds }
+
+  # ---- local-gateways: one per XC load balancer (NOT XC) ---------------------------------------------------------
+  tools-lb:
+    <<: *gateway
+    environment: { <<: *internal-lb-port, LB_NAME: tools-lb }
+    sysctls: { net.ipv4.ip_unprivileged_port_start: 0 }
+    networks: { default: { aliases: [tools.agentic-demo] } }
+    ports: ["127.0.0.1:8011:80"]
+  llm-lb:
+    <<: *gateway
+    environment:
+      <<: *internal-lb-port
+      LB_NAME: llm-lb
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?run deploy/local/compose.sh, not docker compose}  # injected as x-api-key
+    sysctls: { net.ipv4.ip_unprivileged_port_start: 0 }
+    networks: { default: { aliases: [llm.agentic-demo] } }
+    ports: ["127.0.0.1:8012:80"]
+  idp-lb:
+    <<: *gateway
+    environment: { <<: *internal-lb-port, LB_NAME: idp-lb }
+    sysctls: { net.ipv4.ip_unprivileged_port_start: 0 }
+    networks: { default: { aliases: [idp.agentic-demo] } }
+    ports: ["127.0.0.1:8013:80"]
+  erp-lb:
+    <<: *gateway
+    environment: { <<: *internal-lb-port, LB_NAME: erp-lb }
+    sysctls: { net.ipv4.ip_unprivileged_port_start: 0 }
+    networks: { default: { aliases: [erp.agentic-demo] } }
+    ports: ["127.0.0.1:8014:80"]
+  shop-lb:
+    <<: *gateway
+    environment: { LB_NAME: shop-lb }
+    ports: ["127.0.0.1:8001:8080"]
+  ops-lb:
+    <<: *gateway
+    environment: { LB_NAME: ops-lb }
+    ports: ["127.0.0.1:8002:8080"]
+  partner-lb:
+    <<: *gateway
+    environment: { LB_NAME: partner-lb }
+    ports: ["127.0.0.1:8003:8080"]

@@ -8,6 +8,7 @@ members = [
     "copperline-demo",
     "copperline-erp-mock",
     "copperline-idp",
+    "copperline-local-gateway",
     "copperline-mcp-servers",
 ]
 
@@ -128,6 +129,7 @@ dependencies = [
     { name = "copperline-common" },
     { name = "copperline-erp-mock" },
     { name = "copperline-idp" },
+    { name = "copperline-local-gateway" },
     { name = "copperline-mcp-servers" },
     { name = "pyyaml" },
 ]
@@ -144,6 +146,7 @@ requires-dist = [
     { name = "copperline-common", editable = "services/common" },
     { name = "copperline-erp-mock", editable = "services/erp-mock" },
     { name = "copperline-idp", editable = "services/idp" },
+    { name = "copperline-local-gateway", editable = "deploy/local/local-gateway" },
     { name = "copperline-mcp-servers", editable = "services/mcp-servers" },
     { name = "pyyaml", specifier = ">=6.0" },
 ]
@@ -188,6 +191,25 @@ requires-dist = [
     { name = "copperline-common", editable = "services/common" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "copperline-local-gateway"
+version = "0.1.0"
+source = { editable = "deploy/local/local-gateway" }
+dependencies = [
+    { name = "copperline-common" },
+    { name = "httpx" },
+    { name = "starlette" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "copperline-common", editable = "services/common" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "starlette", specifier = ">=0.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

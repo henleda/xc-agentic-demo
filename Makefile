@@ -1,4 +1,4 @@
-.PHONY: check policy lint test local-up local-down local-scenarios devbox-up devbox-run devbox-ssh devbox-tunnel devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+.PHONY: check policy lint test local-up local-down local-check local-scenarios devbox-up devbox-run devbox-ssh devbox-tunnel devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
 
 # All Python runs through uv so everyone gets the same interpreter (3.12, see .python-version) and deps.
 PY := uv run python
@@ -12,11 +12,12 @@ lint:
 test:
 	uv run pytest -q
 
-local-up:                          ## laptop mode, no XC (see deploy/local/README.md)
-	$(PY) scripts/gen_keys.py --if-missing
-	docker compose -f deploy/local/docker-compose.yaml up -d --build --wait
+local-up:                          ## local stack, NOT XC (deploy/local/README.md); on the devbox: make devbox-run CMD="make local-up"
+	deploy/local/compose.sh up -d --build --wait
 local-down:
-	docker compose -f deploy/local/docker-compose.yaml down -v
+	deploy/local/compose.sh down -v
+local-check:                       ## live checks against the running local stack
+	LOCAL_STACK=1 uv run pytest -q -m live deploy/local
 local-scenarios:
 	$(PY) scripts/run_scenario.py --all --env local
 
