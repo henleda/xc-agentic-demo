@@ -31,7 +31,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 1. `services/common`: JSON logging, request IDs, JWT helpers (verify RS256 against JWKS), the MCP 2026-07-28 client and server helpers, and the XC block detector.
 2. `idp`, `erp-mock` (with seed data), `ai-gw` (with `DEMO_STUB_MODEL`), the `mcp-servers` image (4 servers), `agent-runtime` (model loop, tool loop, safe mode, trace), `partner-api`, `cockpit`.
 3. `scripts/gen_keys.py`, `scripts/gen_policy.py`, `scripts/render_secrets.py`.
-4. `deploy/local/docker-compose.yaml`: run every service, plus a tiny `local-gateway` (Envoy or Caddy) that mimics the internal LB names and does JWT plus path checks. This gives a rough stand-in for XC, so scenario logic can be developed offline. It must be clearly labeled as **not** representing XC behavior.
+4. `deploy/local/docker-compose.yaml`: run every service, plus `local-gateway` (Python, `deploy/local/local-gateway/`): one container per XC load balancer except `cockpit-lb`, reading `deploy/xc/intent/` for routes, JWT validation, service policy and header changes. It keeps the internal LB names. This gives a rough stand-in for XC, so scenario logic can be developed offline. It must be clearly labeled as **not** representing XC behavior. See `deploy/local/README.md`.
 5. Unit tests. Every MCP server must reject a header/body mismatch. The IdP must refuse exchanges for disallowed user roles. `gen_policy` must flag `OVERDECLARED` and missing tools.
 
 **Acceptance check:**

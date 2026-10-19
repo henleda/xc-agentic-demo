@@ -34,7 +34,7 @@ Copperline built this themselves. It is deliberately ordinary, so it looks like 
 
 - **`POST /v1/converse`**
   - Body: `{ "messages": [...], "tools": [...]?, "system": str?, "max_tokens": int? }`
-  - Header `x-model-route: fast|standard|premium` selects a Bedrock model or inference-profile ID from env: `ROUTE_FAST`, `ROUTE_STANDARD`, `ROUTE_PREMIUM`.
+  - Header `x-model-route: fast|standard|premium` selects a Bedrock model or inference-profile ID from env: `ROUTE_FAST`, `ROUTE_STANDARD`, `ROUTE_PREMIUM`. A request that carries `x-model-route` more than once, or an unknown route, is rejected with 400 `{ "error": "bad_route" }`: llm-lb's service policy matches this header, so the gateway must never act on a copy the fabric did not judge (docs/08 R37).
   - Calls Bedrock Converse through the `bedrock-runtime` VPC endpoint, using the EC2 instance role.
   - Returns the Bedrock Converse response, normalized as `{ "output": ..., "stop_reason": ..., "usage": {...}, "route": str, "model_id": str }`.
 - **Authentication.**

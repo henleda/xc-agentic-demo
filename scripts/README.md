@@ -34,7 +34,7 @@ It writes the following files. Everything under `.secrets/` is mode 0600, inside
 | File | Content | Used by |
 |---|---|---|
 | `.secrets/idp-signing-key.pem` | RSA 2048 private key (PKCS#8 PEM) | idp (`SIGNING_KEY_PEM` / `SIGNING_KEY_PATH`) |
-| `.secrets/secrets.env` | One `NAME=value` line per secret: `AGENT_SHOPPER_SECRET`, `AGENT_STOREOPS_SECRET`, `AGENT_REFUNDS_SECRET`, `SVC_MCP_SECRET`, `GRANITE_SUPPLY_SECRET`, `GATEWAY_API_KEY`, plus `CLIENT_SECRETS_JSON` (all client secrets as one JSON object, for the idp) | docker compose (`env_file`), `render_secrets.py`, `run_scenario.py` |
+| `.secrets/secrets.env` | One `NAME=value` line per secret: `AGENT_SHOPPER_SECRET`, `AGENT_STOREOPS_SECRET`, `AGENT_REFUNDS_SECRET`, `SVC_MCP_SECRET`, `GRANITE_SUPPLY_SECRET`, `GATEWAY_API_KEY`, plus `CLIENT_SECRETS_JSON` (all client secrets as one JSON object, for the idp) | `deploy/local/compose.sh` (`--env-file`: compose variables only; `docker-compose.yaml` gives each container just the secrets it needs, so never use a service-level `env_file:` for it), `render_secrets.py`, `run_scenario.py`, `make local-check` |
 | `deploy/xc/generated/jwks.json` | The public JWKS (gitignored; pasted into the XC JWT validation configs in Phase 3) | XC LBs, local-gateway, erp-mock |
 
 - **Client list.** The secret names come from `config/personas.yaml` `clients` (kinds `agent`, `service` and `partner`), via `credentials.secret_env_name`. A new client therefore gets a secret automatically.

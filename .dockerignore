@@ -1,9 +1,11 @@
 # Images build with the repo root as context (they need services/common, config/ and scenarios/).
 # Keep secrets, local state and tooling out of every image.
-.env
-.secrets/
-*.pem
-*.p12
+# Secret patterns start with **/ so they match at any depth: package dirs are built into wheels, and a stray
+# services/<x>/.env or *.pem would otherwise land in site-packages inside the image.
+**/.env
+**/.secrets/
+**/*.pem
+**/*.p12
 .git/
 .venv/
 **/__pycache__/

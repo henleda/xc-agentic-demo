@@ -23,18 +23,24 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 
 Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The agents, ai-gw, partner-api and cockpit are added in later Phase 1 steps. Until then, their routes answer **503** from the gateway.
 
-Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, `no-new-privileges`. `make local-check` asserts this. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
+Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 13 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
 
 ## local-gateway: what it does, and what it does not
 
 One process plays **one** XC load balancer (`LB_NAME`), from `deploy/xc/intent/20-load-balancers.yaml`, `service-policies.generated.yaml` and `30-security.yaml`. Origin pools map to compose services in `pools.yaml`. Per request, the first failure wins:
 
+0. **Local safety checks**, not XC behavior: a method other than GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS → **405**; a path with `.` or `..` segments → **400**.
 1. **JWT validation**, on the LB's `target_paths`: RS256 signature against `deploy/xc/generated/jwks.json`, `exp`, `iss`, `aud`, and mandatory claims present. Failure → **401**.
 2. **Service policy**: rules in order, every matcher in a rule ANDed, first match wins, no match is deny. Matchers: path (exact or prefix), method, JWT claims, and request headers. A header sent twice never matches. Failure → **403**.
 3. **Route**: first matching route, with `prefix_rewrite`. No route → **404**.
-4. **Header changes** (`request_headers_to_remove`, then `request_headers_to_add`; the `aigw-api-key` secret comes from env `GATEWAY_API_KEY`), then proxy. Pool down → **503**, pool timeout → **504**.
+4. **Header changes** (`request_headers_to_remove`, then `request_headers_to_add`; the `aigw-api-key` secret comes from env `GATEWAY_API_KEY`), then proxy. Pool down → **503**, pool timeout → **504**, anything else failing while forwarding → **502**. The gateway keeps no cookies between requests, and forwards exactly one `x-request-id`: the caller's, or a generated one if it is missing or empty.
 
-Every response the gateway makes itself carries `x-local-gateway: <lb>`, never `x-copperline-origin`, and its JSON body says `local-gateway — NOT XC`. So `copperline_common.xcblock` classifies it as `blocked_by: xc` with a reason starting `local-gateway (NOT XC)`. Responses from a pool pass through unchanged. Each request is logged as one `lb_request` line, carrying the decision, the matching policy rule, and the pool.
+Every response the gateway makes itself is JSON, carries `x-local-gateway: <lb>`, never `x-copperline-origin`, and its body says `local-gateway — NOT XC`. `copperline_common.xcblock` then classifies:
+
+- the gateway's **4xx** (400, 401, 403, 404, 405) as `blocked_by: xc`, reason starting `local-gateway (NOT XC)`;
+- the gateway's **5xx** (502, 503, 504) as `blocked_by: network`, reason `upstream unreachable behind LB (HTTP …)`, per its rule for a 5xx behind an LB. Until ai-gw exists (step 6), that is what an allowed model step gets.
+
+Responses from a pool pass through unchanged. Each request is logged as one `lb_request` line with `decision` (`allowed`, `denied`, or `upstream_error` when the policy allowed it but the pool failed), the matching `policy_rule`, and the `pool`.
 
 **Not emulated** (each gateway names these at startup in `gateway_ready.not_emulated`): WAF, Data Guard, rate limiting, API definitions and OpenAPI validation, API and sensitive-data discovery, user identification, and malicious user detection. The `cockpit-lb` source-IP policy is not emulated either: locally the cockpit will be published on 127.0.0.1 with no gateway in front.
 
