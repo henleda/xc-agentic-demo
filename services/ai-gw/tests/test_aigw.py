@@ -58,11 +58,13 @@ def test_missing_or_wrong_key_is_401(gw, key):
     assert response.status_code == 401 and response.json()["error"] == "invalid_api_key"
 
 
-def test_two_api_keys_are_401_even_if_one_is_right(gw):
+@pytest.mark.parametrize("keys", [("wrong", KEY), (KEY, "wrong"), (KEY, KEY)])
+def test_the_api_key_must_be_sent_exactly_once(gw, keys):
+    """(KEY, KEY) pins "exactly once": a check that reads only the first copy would accept it."""
     gateway, _ = gw()
-    response = gateway.post("/v1/converse", json=BODY,
-                            headers=[("x-api-key", "wrong"), ("x-api-key", KEY), ("x-model-route", "fast")])
-    assert response.status_code == 401
+    headers = [("x-api-key", key) for key in keys] + [("x-model-route", "fast")]
+    response = gateway.post("/v1/converse", json=BODY, headers=headers)
+    assert response.status_code == 401 and response.json()["error"] == "invalid_api_key"
 
 
 def test_key_is_checked_before_route_and_body(gw):
@@ -128,6 +130,49 @@ def test_every_response_says_it_came_from_ai_gw(gw):
 
 
 # ---- budgets and usage --------------------------------------------------------------------------------------------
+
+
+class SpyModel:
+    """Wraps the stub and records each request body the gateway hands to the model."""
+
+    def __init__(self) -> None:
+        self.stub = StubModel()
+        self.bodies: list[dict] = []
+
+    def converse(self, route, body, scenario):
+        self.bodies.append(body)
+        return self.stub.converse(route, body, scenario)
+
+
+def test_an_over_budget_call_never_reaches_the_model(gw):
+    spy = SpyModel()
+    gateway, _ = gw(model=spy, budgets={"fast": 1, "standard": 1, "premium": 1})
+    assert call(gateway).status_code == 200
+    assert call(gateway).status_code == 429
+    assert len(spy.bodies) == 1
+
+
+def test_a_bad_body_is_400_even_when_the_budget_is_used_up(gw):
+    """Check order: body (3) before budget (4)."""
+    gateway, _ = gw(budgets={"fast": 1, "standard": 1, "premium": 1})
+    call(gateway)
+    assert call(gateway, {"messages": []}).json()["error"] == "bad_request"
+
+
+def test_max_tokens_is_capped_and_defaults_to_the_cap(gw):
+    spy = SpyModel()
+    gateway, _ = gw(model=spy)
+    call(gateway, {"messages": [USER], "max_tokens": 400})
+    call(gateway, {"messages": [USER], "max_tokens": 99999})
+    call(gateway, {"messages": [USER]})
+    assert [body["max_tokens"] for body in spy.bodies] == [400, 2048, 2048]
+
+
+def test_deeply_nested_json_is_400_not_500(gw):
+    gateway, _ = gw()
+    nested = b"[" * 100_000 + b"]" * 100_000
+    response = gateway.post("/v1/converse", content=nested, headers={"x-api-key": KEY, "x-model-route": "fast"})
+    assert response.status_code == 400 and response.json()["error"] == "bad_request"
 
 
 def test_budget_is_per_route_and_429_once_used_up(gw):
@@ -210,6 +255,25 @@ def test_every_scenario_with_a_model_step_has_a_stub_reply():
     assert with_model and with_model <= set(StubModel().scenarios)
 
 
+TOOL_STATUS = {"name": "orders__get_order_status", "description": "", "input_schema": {"type": "object"}}
+TOOL_REVIEWS = {"name": "catalog__get_reviews", "description": "", "input_schema": {"type": "object"}}
+
+
+@pytest.mark.parametrize("tools", [[TOOL_STATUS, TOOL_REVIEWS], [TOOL_REVIEWS, TOOL_STATUS]])
+def test_stub_picks_the_matching_tool_wherever_it_is_listed(gw, tools):
+    gateway, _ = gw()
+    reply = call(gateway, {"messages": [USER], "tools": tools}).json()
+    assert reply["output"]["message"]["content"][0]["toolUse"]["name"] == "orders__get_order_status"
+
+
+def test_stub_replies_with_text_when_no_tool_matches(gw):
+    gateway, _ = gw()
+    hello = {"role": "user", "content": [{"text": "Hello there, how are you today?"}]}
+    reply = call(gateway, {"messages": [hello], "tools": [TOOL_STATUS, TOOL_REVIEWS]}).json()
+    assert reply["stop_reason"] == "end_turn"
+    assert reply["output"]["message"]["content"] == [{"text": StubModel().default}]
+
+
 def test_stub_calls_a_matching_tool_when_tools_are_offered(gw):
     """Enough of a tool loop for agent-runtime to be tested offline (step 7)."""
     gateway, _ = gw()
@@ -285,16 +349,141 @@ def test_a_route_without_a_model_is_refused_in_bedrock_mode(gw, bedrock):
     assert call(gateway, route="premium").json()["error"] == "bad_route"
 
 
-@pytest.mark.parametrize("code, status", [("ThrottlingException", 429), ("AccessDeniedException", 502),
-                                          ("ValidationException", 502)])
-def test_bedrock_errors_map_to_gateway_statuses(gw, bedrock, code, status):
-    client, stubber = bedrock
-    stubber.add_client_error("converse", service_error_code=code, service_message="nope")
+ARN_MESSAGE = ("User: arn:aws:sts::111122223333:assumed-role/copperline-core/i-0123456789abcdef0 is not "
+               "authorized to perform: bedrock:InvokeModel")
+
+
+def bedrock_gw(gw, client, **overrides):
     model = BedrockModel("us-east-1", {"fast": "model-fast"}, client=client)
-    gateway, admin = gw(model=model, stub_model=False, aws_region="us-east-1", route_models={"fast": "model-fast"})
+    return gw(model=model, stub_model=False, aws_region="us-east-1", route_models={"fast": "model-fast"}, **overrides)
+
+
+@pytest.mark.parametrize(
+    "codes, status, error",
+    [
+        (["AccessDeniedException"], 502, "bedrock_error"),  # not retried: the model never runs, but it never will
+        (["ValidationException"], 502, "bedrock_error"),
+        (["ModelTimeoutException"], 504, "bedrock_timeout"),  # not retried: the model may have run
+        (["ThrottlingException", "ThrottlingException"], 429, "bedrock_error"),  # retried once, then given up
+        (["ServiceUnavailableException", "ServiceUnavailableException"], 502, "bedrock_error"),
+    ],
+)
+def test_bedrock_errors_map_to_gateway_statuses(gw, bedrock, codes, status, error):
+    client, stubber = bedrock
+    for code in codes:
+        stubber.add_client_error("converse", service_error_code=code, service_message=ARN_MESSAGE)
+    gateway, admin = bedrock_gw(gw, client)
     response = call(gateway)
-    assert response.status_code == status and code in response.json()["message"]
+    assert (response.status_code, response.json()) == (status, {"error": error, "message": codes[0]})
     assert admin.get("/v1/usage").json()["calls"] == 0
+
+
+def test_a_throttled_call_that_succeeds_on_retry_is_a_normal_200(gw, bedrock):
+    client, stubber = bedrock
+    stubber.add_client_error("converse", service_error_code="ThrottlingException")
+    stubber.add_response("converse", BEDROCK_REPLY)
+    gateway, admin = bedrock_gw(gw, client)
+    assert call(gateway).status_code == 200
+    assert admin.get("/v1/usage").json()["calls"] == 1
+
+
+def test_aws_account_details_stay_in_the_log_not_the_response(gw, bedrock, capsys):
+    client, stubber = bedrock
+    stubber.add_client_error("converse", service_error_code="AccessDeniedException", service_message=ARN_MESSAGE)
+    gateway, _ = bedrock_gw(gw, client)
+    response = call(gateway)
+    assert "111122223333" not in response.text and "arn:aws" not in response.text
+    assert "111122223333" in capsys.readouterr().out  # the presenter can still find it in ai-gw's logs
+
+
+class RaisingClient:
+    """A fake bedrock-runtime client that raises the given botocore errors in turn, then succeeds."""
+
+    def __init__(self, *errors) -> None:
+        self.errors = list(errors)
+        self.calls = 0
+
+    def converse(self, **request):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return BEDROCK_REPLY
+
+
+def read_timeout():
+    from botocore.exceptions import ReadTimeoutError
+    return ReadTimeoutError(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com")
+
+
+def connect_timeout():
+    from botocore.exceptions import ConnectTimeoutError
+    return ConnectTimeoutError(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com")
+
+
+def unreachable():
+    from botocore.exceptions import EndpointConnectionError
+    return EndpointConnectionError(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com")
+
+
+@pytest.mark.parametrize(
+    "errors, status, error, calls",
+    [
+        ([read_timeout], 504, "bedrock_timeout", 1),  # never retried: the model may be running and billing
+        ([connect_timeout, connect_timeout], 504, "bedrock_timeout", 2),  # never connected: one retry is safe
+        ([unreachable, unreachable], 502, "bedrock_unreachable", 2),
+        ([connect_timeout], 200, None, 2),  # the retry succeeds
+    ],
+)
+def test_botocore_failures_map_to_gateway_statuses(gw, errors, status, error, calls):
+    client = RaisingClient(*(make() for make in errors))
+    gateway, admin = bedrock_gw(gw, client)
+    response = call(gateway)
+    assert response.status_code == status and client.calls == calls
+    if error:
+        assert response.json()["error"] == error
+        assert admin.get("/v1/usage").json()["calls"] == 0
+
+
+def test_a_shape_bedrock_rejects_client_side_is_400_without_echoing_it(gw):
+    """botocore validates parameters before sending (ParamValidationError): the caller's fault, not an outage."""
+    client = boto3.client("bedrock-runtime", region_name="us-east-1", aws_access_key_id="x",
+                          aws_secret_access_key="x")
+    client.meta.events.register("before-send.bedrock-runtime.Converse",
+                                lambda **_: pytest.fail("validation must stop the request before it is sent"))
+    gateway, _ = bedrock_gw(gw, client)
+    response = call(gateway, {"messages": [{"role": "user", "content": [{"text": 5}]}]})
+    assert response.status_code == 400 and response.json()["error"] == "bad_request"
+    assert "value: 5" not in response.text
+
+
+def test_a_multi_turn_tool_conversation_is_sent_to_bedrock_unchanged(gw, bedrock):
+    """The shape agent-runtime's loop sends: user text, assistant toolUse, user toolResult; max_tokens under the cap;
+    a tool with an empty description; no system prompt."""
+    client, stubber = bedrock
+    tool_use = {"toolUseId": "t1", "name": "orders__get_order_status", "input": {"order_id": "CO-1042"}}
+    messages = [USER, {"role": "assistant", "content": [{"toolUse": tool_use}]},
+                {"role": "user", "content": [{"toolResult": {"toolUseId": "t1", "content": [{"text": "shipped"}]}}]}]
+    tools = [{"name": "orders__get_order_status", "description": "", "input_schema": {"type": "object"}}]
+    stubber.add_response("converse", BEDROCK_REPLY, {
+        "modelId": "model-fast",
+        "messages": messages,
+        "inferenceConfig": {"maxTokens": 400},
+        "toolConfig": {"tools": [{"toolSpec": {"name": "orders__get_order_status",
+                                               "description": "orders__get_order_status",
+                                               "inputSchema": {"json": {"type": "object"}}}}]},
+    })
+    gateway, _ = bedrock_gw(gw, client)
+    assert call(gateway, {"messages": messages, "tools": tools, "max_tokens": 400}).status_code == 200
+
+
+def test_create_gateway_app_wires_bedrock_from_settings(gw):
+    """The production path, with no injected model: route map and read timeout come from Settings; no AWS call."""
+    gateway, _ = gw(stub_model=False, aws_region="us-east-1", route_models={"fast": "model-fast"},
+                    bedrock_timeout_s=7.0)
+    model = gateway.app.state.model
+    assert isinstance(model, BedrockModel) and model.route_models == {"fast": "model-fast"}
+    assert model.client.meta.config.read_timeout == 7.0
+    assert model.client.meta.config.retries["total_max_attempts"] == 1  # retries are ours, not botocore's
 
 
 # ---- settings -----------------------------------------------------------------------------------------------------
@@ -328,3 +517,58 @@ def test_settings_from_env_in_bedrock_mode(monkeypatch):
     s = Settings.from_env()
     assert s.route_models == {"fast": "m-fast", "standard": "m-std"} and s.unknown_routes == ["premium"]
     assert s.budgets["premium"] == 50 and not s.stub_model
+
+
+# ---- process wiring (python -m ai_gw) ------------------------------------------------------------------------------
+
+
+def test_every_log_line_says_ai_gw_even_after_the_admin_app_is_built(capsys):
+    """Both apps live in one process; the admin app must not re-tag the gateway's logs as ai-gw-admin."""
+    import json
+
+    s = settings()
+    usage = Usage(s.budgets)
+    gateway = TestClient(create_gateway_app(s, usage))
+    create_admin_app(s, usage)  # built second, as python -m ai_gw does
+    capsys.readouterr()
+    call(gateway)
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+    converse_lines = [line for line in lines if line["event"] == "converse"]
+    assert converse_lines and {line["service"] for line in lines} == {"ai-gw"}
+    assert gateway.post("/v1/converse").headers["x-copperline-origin"] == "ai-gw"  # the header is still per app
+
+
+def test_python_m_ai_gw_serves_both_apps_on_one_usage_table(monkeypatch):
+    """What the container runs. A second Usage for the admin app would make the cockpit show 0 calls and make
+    "reset" clear a table the gateway never reads."""
+    import asyncio
+
+    from ai_gw import __main__ as main
+
+    started = {}
+
+    class FakeServer:
+        def __init__(self, app, port):
+            self.app, self.port = app, port
+
+        async def serve(self):
+            started[self.port] = self.app
+
+    monkeypatch.setattr(main, "server", lambda app, host, port: FakeServer(app, port))
+    asyncio.run(main.serve(settings(port=9001, admin_port=9002)))
+    gateway, admin = TestClient(started[9001]), TestClient(started[9002])
+    assert call(gateway).status_code == 200
+    assert admin.get("/v1/usage").json()["calls"] == 1
+    admin.post("/v1/usage/reset")
+    assert started[9001].state.usage.snapshot()["calls"] == 0
+
+
+def test_settings_defaults_from_env(monkeypatch):
+    for name in ("AIGW_PORT", "AIGW_ADMIN_PORT", "GATEWAY_REQUIRE_KEY", "DEMO_STUB_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GATEWAY_API_KEY", "k")
+    monkeypatch.setenv("DEMO_STUB_MODEL", "true")
+    s = Settings.from_env()
+    assert (s.port, s.admin_port, s.require_key) == (8090, 8190, True)
+    monkeypatch.setenv("AIGW_ADMIN_PORT", "9190")
+    assert Settings.from_env().admin_port == 9190

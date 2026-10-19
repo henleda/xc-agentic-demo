@@ -22,7 +22,7 @@ class Settings:
     host: str = "0.0.0.0"
     stub_replies_path: str | None = None  # default: ai_gw/stub_replies.yaml in the package
     max_tokens_cap: int = 2048  # a caller may ask for less, never more
-    bedrock_timeout_s: float = 30.0
+    bedrock_timeout_s: float = 25.0  # below llm-lb's route timeout (docs/08 R39); never retried
     unknown_routes: list[str] = field(default_factory=list)  # routes with no model ID (Bedrock mode only)
 
     @classmethod

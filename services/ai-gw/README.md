@@ -22,8 +22,8 @@ The body and response shapes are in `docs/03-services.md` and `services/common/A
 | 1 | `x-api-key` equals `GATEWAY_API_KEY`, sent exactly once (skipped when `GATEWAY_REQUIRE_KEY=false`) | 401 `invalid_api_key` |
 | 2 | Exactly one `x-model-route` header, and it is `fast`, `standard` or `premium` with a model configured (Bedrock mode). A repeated header is refused: llm-lb's `sp-llm` matched one copy, so the gateway must never act on another (docs/08 R37) | 400 `bad_route` |
 | 3 | Body: a JSON object; `messages` a non-empty list of `{role: user\|assistant, content: [blocks]}` starting with `user`; optional `system` string; optional `tools` list of `{name, description, input_schema}`; optional positive integer `max_tokens` (capped at 2048) | 400 `bad_request` |
-| 4 | The route's daily token budget (`BUDGET_TOKENS_<ROUTE>`) is not used up. Checked before the call, so the last call of the day can overshoot by its own size | 429 `budget_exceeded` |
-| 5 | The model call. Bedrock `ThrottlingException` → 429, other Bedrock errors → 502 `bedrock_error`, timeouts → 504, unreachable → 502 `bedrock_unreachable` | as listed |
+| 4 | The route's daily token budget (`BUDGET_TOKENS_<ROUTE>`) is not used up. Checked before the call and never reserved, so calls already in flight when the budget runs out can overshoot it by their combined size. That is how ordinary gateways with after-the-fact token counts behave | 429 `budget_exceeded` |
+| 5 | The model call. A shape botocore rejects before sending → 400 `bad_request`; `ThrottlingException` → 429 `bedrock_error`; a read timeout or `ModelTimeoutException` → 504 `bedrock_timeout`; endpoint unreachable → 502 `bedrock_unreachable`; any other Bedrock error → 502 `bedrock_error`. The `message` is only the error code: the full Bedrock message can name the AWS account, role and instance, so it goes to the `bedrock_error` log line instead | as listed |
 
 Refused and failed calls are not counted in usage. Every response carries `x-copperline-origin: ai-gw`.
 
@@ -43,6 +43,7 @@ Counts are since the last reset, or 00:00 UTC, or the last restart, whichever is
 ## Bedrock mode (`DEMO_STUB_MODEL=false`)
 
 - boto3 `bedrock-runtime` `converse()` with the instance role's credentials (never baked into the image), through the VPC endpoint. Set `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` only if private DNS is off.
+- **Timeouts and retries.** One read timeout of 25 s, **never retried**: the model may already be running and billing, and llm-lb gives up soon after. Only failures where the model did not run (connect errors, `ThrottlingException`, `ServiceUnavailableException`) get one more try. 25 s must stay below llm-lb's route timeout (docs/08 R39), and the agent's model-call timeout must be above llm-lb's.
 - `tools` in our wire format become Bedrock's `toolConfig.tools[].toolSpec` (`inputSchema.json`); `system` becomes `[{"text": …}]`; `max_tokens` becomes `inferenceConfig.maxTokens`. The response's `output`, `stopReason` and `usage` are passed through, normalized as `{output, stop_reason, usage, route, model_id}`.
 - Route map: `ROUTE_FAST`, `ROUTE_STANDARD`, `ROUTE_PREMIUM` are Bedrock model IDs or inference-profile IDs. Pick current Anthropic Claude models available in `${AWS_REGION}`, and confirm model access in the Bedrock console (R24). A route left empty is refused with `bad_route`.
 - The `premium` route exists only so S5 has something to be denied. It can map to the same model as `standard`.
@@ -54,7 +55,7 @@ No network calls. Token counts are word counts, so usage and budgets still move.
 - **Scripted turns.** A request whose `x-demo-scenario` header names a scenario in `ai_gw/stub_replies.yaml` gets that canned reply. Anything else gets `default`. Edit the file freely; only `test_every_scenario_with_a_model_step_has_a_stub_reply` depends on it. (`TODO(verify-xc)` R34: the header must pass through llm-lb. It only matters in stub mode.)
 - **Model-driven turns** (no matching scenario, `tools` offered, no `toolResult` yet in the messages): the stub calls the first offered tool whose name shares a word with the last user message, with empty input, and `stop_reason: tool_use`. Once a tool result is in the messages it replies with text. This exists so agent-runtime's tool loop can be tested offline; it is not trying to be smart.
 
-Local compose defaults to stub mode (`LOCAL_STUB_MODEL`, default `true`). On stage, real Bedrock is the default and the stub is the outage fallback.
+Local compose defaults to stub mode (`LOCAL_STUB_MODEL`, default `true`); `deploy/local/README.md` shows how to switch it to Bedrock. On stage, real Bedrock is the default and the stub is the outage fallback.
 
 ## Env
 
@@ -71,4 +72,4 @@ Local compose defaults to stub mode (`LOCAL_STUB_MODEL`, default `true`). On sta
 
 ## Logging
 
-`converse` per successful call (`route`, `model_id`, `scenario`, `tokens_in`, `tokens_out`, `stop_reason`, the identity headers) and `converse_refused` per refusal (`error`, `reason`, `route`). One `aigw_ready` line at startup with the mode, ports, routes and budgets. Message content is never logged.
+Every line says `service: ai-gw`, from either port. `converse` per successful call (`route`, `model_id`, `scenario`, `tokens_in`, `tokens_out`, `stop_reason`, the identity headers), `converse_refused` per refusal (`error`, `reason`, `route`), and `bedrock_error` per failed Bedrock attempt (`code`, `attempt`, and Bedrock's full `message`). One `aigw_ready` line at startup with the mode, ports, routes and budgets. Message content is never logged.

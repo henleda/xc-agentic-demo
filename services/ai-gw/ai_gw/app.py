@@ -9,13 +9,13 @@ POST /v1/converse checks, in order (first failure wins):
     2. exactly one x-model-route, and it is a known route                 -> 400 bad_route
     3. the body is a JSON object with a non-empty messages list, ...      -> 400 bad_request
     4. the route's daily token budget is not used up                      -> 429 budget_exceeded
-    5. the model call                                                     -> 502 / 504 on failure
+    5. the model call -> 400 shape rejected by the Bedrock client, 429 throttled, 502 failed, 504 timed out
 """
 
 import hmac
 import time
 
-from copperline_common.logging import log_event
+from copperline_common.logging import log_event, setup_logging
 from copperline_common.requestid import REQUEST_ID_HEADER
 from copperline_common.service import setup_service
 from fastapi import FastAPI, Request
@@ -59,7 +59,8 @@ def create_admin_app(settings: Settings, usage: Usage) -> FastAPI:
     app = FastAPI(title="copperline-ai-gw-admin", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.usage = usage
-    setup_service(app, ADMIN_SERVICE)
+    setup_service(app, ADMIN_SERVICE)  # /healthz and x-copperline-origin say ai-gw-admin ...
+    setup_logging(SERVICE)  # ... but it is one process, so every log line keeps service=ai-gw (as erp-mock does)
     app.add_exception_handler(StarletteHTTPException, http_error)
     app.add_api_route("/v1/usage", get_usage, methods=["GET"])
     app.add_api_route("/v1/usage/reset", reset_usage, methods=["POST"])
@@ -99,7 +100,7 @@ async def converse(request: Request) -> JSONResponse:
 
     try:
         payload = await request.json()
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: deeply nested JSON
         return refuse(400, "bad_request", "body is not JSON", route)
     body, problem = _checked_body(payload, settings.max_tokens_cap)
     if problem:
