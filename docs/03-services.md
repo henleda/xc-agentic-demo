@@ -42,7 +42,7 @@ Copperline built this themselves. It is deliberately ordinary, so it looks like 
   - **Agents never hold this key.** XC `llm-lb` injects it with `request_headers_to_add`, sourced from an XC secret.
   - The gateway also logs the `x-agent-id` and `x-obo-sub` headers, which `llm-lb` sets from JWT claims (if XC supports this; see `docs/08`). Otherwise the agent runtime sends them and `llm-lb` only checks that they match the claims.
 - **Budgets.** Per-route daily token budgets live in memory (`BUDGET_TOKENS_<ROUTE>`). Over budget, it returns 429 with `{ "error": "budget_exceeded" }`. This is customer logic, which shows that XC and the customer gateway are complementary.
-- **`GET /v1/usage`.** Returns tokens by route and by `x-agent-id`. Read by the cockpit.
+- **`GET /v1/usage`.** Returns tokens by route and by `x-agent-id`. Read by the cockpit. It is served on a separate admin port, **8190**, published on host loopback only, with `POST /v1/usage/reset`, so it is never reachable through llm-lb.
 - **`DEMO_STUB_MODEL=true`.** Returns canned responses with no Bedrock call. Use it for local development and as the outage fallback.
 
 ### MCP tool servers (2026-07-28 stateless)

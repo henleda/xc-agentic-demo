@@ -2,9 +2,8 @@
 
 This is the step-5 checkpoint in-process: allowed calls succeed, S1 / S3a / S5 are denied by the local-gateway
 (blocked_by: xc, labelled NOT XC), and S1b passes the gateway and is rejected by the MCP server (blocked_by: server).
-No expect.local block asserts an allowed model step, which is just as well: ai-gw arrives in step 6, so llm-lb
-answers an allowed model call itself with HTTP 503 (blocked_by: network) and the plan carries on. A model call that
-sp-llm denies (S5 step 3) is already a gateway 403.
+Model steps go through llm-lb to ai-gw in stub mode: allowed ones get a canned 200 reply, and S5's premium call is
+a gateway 403 (sp-llm) that never reaches ai-gw.
 """
 
 import asyncio
@@ -116,3 +115,31 @@ def test_the_idp_lb_does_not_expose_demo_login(stack):
         return await stack.http.post(f"{IDP}/auth/demo-login", json={"sub": "alex.rivera"})
     response = asyncio.run(go())
     assert response.status_code == 403 and response.headers["x-local-gateway"] == "idp-lb"
+
+
+@pytest.mark.parametrize("scenario_id, i, route", [("S0", 2, "fast"), ("S1", 1, "fast"), ("S2", 1, "standard")])
+def test_allowed_model_steps_reach_ai_gw_through_llm_lb(stack, scenario_id, i, route):
+    """llm-lb validates the agent token, applies sp-llm, swaps in the gateway key; ai-gw answers with its stub."""
+    trace, _ = asyncio.run(run_scenario(stack, scenario_id))
+    step = next(s for s in trace if s["i"] == i)
+    assert (step["kind"], step["status"], step["blocked_by"]) == ("model", 200, None), step
+    assert step["result_preview"].startswith("(stub model)")
+    usage = stack.usage.snapshot()
+    assert usage["by_route"][route]["calls"] == 1
+    agent = by_id(SCENARIOS, scenario_id).agent
+    assert usage["by_agent"][agent]["calls"] == 1  # x-agent-id from the agent runtime reached ai-gw
+
+
+def test_s5_premium_never_reaches_ai_gw(stack):
+    asyncio.run(run_scenario(stack, "S5"))
+    assert stack.usage.snapshot()["calls"] == 0
+
+
+def test_agents_cannot_read_gateway_usage_through_llm_lb(stack):
+    """sp-llm is pinned to POST /v1/converse (docs/04), so /v1/usage is only on the loopback admin port."""
+    async def go():
+        user = await user_login(stack, "alex.rivera", "shop-lb")
+        token = (await agent_tokens(stack, "shopper", user))["aud:copperline-llm"]
+        return await stack.http.get(f"{LLM}/v1/usage", headers={"Authorization": f"Bearer {token}"})
+    response = asyncio.run(go())
+    assert response.status_code == 403 and response.headers["x-local-gateway"] == "llm-lb"

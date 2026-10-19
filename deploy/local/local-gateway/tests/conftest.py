@@ -12,6 +12,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from ai_gw.app import create_admin_app as create_aigw_admin_app
+from ai_gw.app import create_gateway_app as create_aigw_app
+from ai_gw.settings import Settings as AigwSettings
+from ai_gw.usage import Usage
 from copperline_common.jwt import public_jwks, sign
 from copperline_common.outbound import new_http_client
 from cryptography.hazmat.primitives import serialization
@@ -164,11 +168,12 @@ def unreachable_gateway(jwks_path):
 class Stack:
     http: httpx.AsyncClient  # a client "inside the compose network": it resolves every LB and pool hostname
     db: Db
+    usage: Usage  # ai-gw's token usage (what GET /v1/usage on the admin port returns)
 
 
 @pytest.fixture
 def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
-    """The real services behind the real gateway logic. ai-gw and the agents are not built yet (connection refused)."""
+    """The real services behind the real gateway logic; ai-gw in stub mode. The agents are not built yet."""
     for client_id, secret in SECRETS.items():
         monkeypatch.setenv(client_id.upper().replace("-", "_") + "_SECRET", secret)  # plan token steps read env
     pem = rsa_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -185,8 +190,13 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
         settings = McpSettings(server=server, config_dir=config_dir, erp_base_url="http://erp.agentic-demo",
                                idp_base_url="http://idp.agentic-demo", svc_client_secret=SECRETS["svc-mcp"])
         mesh.apps[f"mcp-{server}"] = create_mcp_app(settings, http=http)
+    aigw_settings = AigwSettings(stub_model=True, route_models={}, api_key=GATEWAY_KEY,
+                                 budgets={"fast": 200_000, "standard": 200_000, "premium": 50_000})
+    usage = Usage(aigw_settings.budgets)
+    mesh.apps["ai-gw"] = create_aigw_app(aigw_settings, usage)
+    mesh.apps["ai-gw-admin"] = create_aigw_admin_app(aigw_settings, usage)
     for host, lb_name in LB_HOSTS.items():
         mesh.apps[host] = gateway(lb_name, jwks_path, http)
 
-    yield Stack(http=http, db=db)
+    yield Stack(http=http, db=db, usage=usage)
     db.close()

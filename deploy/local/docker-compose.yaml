@@ -12,7 +12,7 @@
 # Published on 127.0.0.1 only:
 #   front doors   shop-lb 8001   ops-lb 8002   partner-lb 8003
 #   internal LBs  tools-lb 8011  llm-lb 8012   idp-lb 8013   erp-lb 8014   (debugging and tests; not reachable in XC)
-#   erp-mock admin 8181
+#   erp-mock admin 8181   ai-gw admin 8190
 name: copperline-local
 
 x-hardened: &hardened
@@ -82,6 +82,26 @@ services:
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=2)"]
+
+  ai-gw:
+    <<: *hardened
+    build: { context: ../.., dockerfile: services/ai-gw/Dockerfile }
+    image: copperline/ai-gw:local
+    environment:
+      DEMO_STUB_MODEL: ${LOCAL_STUB_MODEL:-true}   # local default: canned replies, no AWS (plan U8)
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY:?run deploy/local/compose.sh, not docker compose}
+      GATEWAY_REQUIRE_KEY: "true"
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      ROUTE_FAST: ${ROUTE_FAST:-}
+      ROUTE_STANDARD: ${ROUTE_STANDARD:-}
+      ROUTE_PREMIUM: ${ROUTE_PREMIUM:-}
+      BUDGET_TOKENS_FAST: ${BUDGET_TOKENS_FAST:-200000}
+      BUDGET_TOKENS_STANDARD: ${BUDGET_TOKENS_STANDARD:-200000}
+      BUDGET_TOKENS_PREMIUM: ${BUDGET_TOKENS_PREMIUM:-50000}
+    ports: ["127.0.0.1:8190:8190"]  # admin (usage, reset): loopback only, never through a gateway
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2)"]
 
   mcp-catalog:
     <<: *mcp

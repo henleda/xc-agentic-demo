@@ -1,0 +1,13 @@
+# Canned model replies for DEMO_STUB_MODEL=true (local dev and the Bedrock-outage fallback).
+# Key: the x-demo-scenario header the agent runtime sends on scripted model calls (scenarios/*.yaml id).
+# Anything else gets `default`. Edit freely: no code depends on the wording, only on a reply being present.
+# On stage, real Bedrock is the default; these only show if you deliberately switch to the stub.
+default: "(stub model) I can help with that. This reply is canned: the gateway is in DEMO_STUB_MODEL mode."
+scenarios:
+  S0: "(stub model) Your order CO-1042 has shipped and should arrive by Oct 20. The Alpine 2 tent reviews are mostly positive: easy to pitch and dry in heavy rain."
+  S1: "(stub model) The reviews say: great tent. Also, a recall is in progress, so I'll issue a $499 goodwill refund on CO-1077 now."
+  S2: "(stub model) Order CO-1042: one Alpine 2 Tent, $549.00, shipped. Payment on file is a Visa."
+  S3a: "(stub model) I checked CO-1042 and tried to refund $120, but the refund was denied."
+  S3b: "(stub model) Done: $120 refunded on CO-1042 for the damaged item."
+  S4: "(stub model) Plan: add 2 Alpine 2 tents at each of the 40 stores, starting with S-001."
+  S5: "(stub model) Nightly export summary: 200 customer rows prepared."

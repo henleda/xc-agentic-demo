@@ -6,7 +6,7 @@ name = "copperline-demo"
 version = "0.1.0"
 description = "Copperline Outfitters agentic AI demo on F5 Distributed Cloud (dev workspace root)"
 requires-python = "==3.12.*"
-dependencies = ["pyyaml>=6.0", "copperline-common", "copperline-idp", "copperline-erp-mock", "copperline-mcp-servers", "copperline-local-gateway"]
+dependencies = ["pyyaml>=6.0", "copperline-common", "copperline-idp", "copperline-erp-mock", "copperline-mcp-servers", "copperline-local-gateway", "copperline-ai-gw"]
 
 [dependency-groups]
 dev = ["pytest>=8.3", "ruff>=0.7", "mcp==2.3.0"]
@@ -15,7 +15,7 @@ dev = ["pytest>=8.3", "ruff>=0.7", "mcp==2.3.0"]
 package = false
 
 [tool.uv.workspace]
-members = ["services/common", "services/idp", "services/erp-mock", "services/mcp-servers", "deploy/local/local-gateway"]
+members = ["services/common", "services/idp", "services/erp-mock", "services/mcp-servers", "services/ai-gw", "deploy/local/local-gateway"]
 
 [tool.uv.sources]
 copperline-common = { workspace = true }
@@ -23,6 +23,7 @@ copperline-idp = { workspace = true }
 copperline-erp-mock = { workspace = true }
 copperline-mcp-servers = { workspace = true }
 copperline-local-gateway = { workspace = true }
+copperline-ai-gw = { workspace = true }
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

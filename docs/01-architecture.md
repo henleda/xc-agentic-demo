@@ -75,7 +75,7 @@ ASCII version (for terminals):
 ## Ports
 
 - Containers: 8080 (all vK8s services).
-- EC2: erp-mock 8081, copperline-ai-gw 8090, cockpit 8095. The security group allows all three **only from the CE inside subnet**. erp-mock admin (8181) and AI gateway admin endpoints are published on the host loopback only.
+- EC2: erp-mock 8081, copperline-ai-gw 8090, cockpit 8095. The security group allows all three **only from the CE inside subnet**. erp-mock admin (8181) and AI gateway admin (8190: usage and reset) are published on the host loopback only.
 - Internal LBs listen on HTTP 80 on the vK8s service network. Site-to-site traffic is encrypted by the XC fabric. TLS on internal LBs is a stretch goal.
 - Public LBs: HTTPS 443 with XC auto-cert on `<DEMO_DOMAIN>`.
 - Local mode (no XC): the front doors are published as `127.0.0.1:8001` (shop), `8002` (ops) and `8003` (partner), and the internal LBs keep their names and port 80 on the compose network. See `deploy/local/README.md`.

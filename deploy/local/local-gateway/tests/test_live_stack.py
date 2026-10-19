@@ -31,6 +31,7 @@ PROJECT = "copperline-local"
 FRONT_DOORS = {"shop-lb": "http://127.0.0.1:8001", "ops-lb": "http://127.0.0.1:8002", "partner-lb": "http://127.0.0.1:8003"}
 TOOLS, LLM, IDP, ERP = "http://127.0.0.1:8011", "http://127.0.0.1:8012", "http://127.0.0.1:8013", "http://127.0.0.1:8014"
 ERP_ADMIN = "http://127.0.0.1:8181"
+AIGW_ADMIN = "http://127.0.0.1:8190"
 GATEWAYS = {"tools-lb": TOOLS, "llm-lb": LLM, "idp-lb": IDP, "erp-lb": ERP, **FRONT_DOORS}
 AGENT_CLIENTS = {"shopper": "agent-shopper", "storeops": "agent-storeops", "refunds": "agent-refunds"}
 SCENARIOS = load_scenarios(REPO / "scenarios")
@@ -116,7 +117,7 @@ def test_mcp_servers_never_had_to_deny():
 def test_every_container_runs_like_a_vk8s_pod():
     ids = subprocess.run(["docker", "ps", "-q", "--filter", f"label=com.docker.compose.project={PROJECT}"],
                          capture_output=True, text=True, check=True).stdout.split()
-    assert len(ids) == 13, "expected idp, erp-mock, 4 MCP servers and 7 gateways"
+    assert len(ids) == 14, "expected idp, erp-mock, ai-gw, 4 MCP servers and 7 gateways"
     fmt = ("{{json .Name}} {{json .Config.User}} {{json .HostConfig.ReadonlyRootfs}} {{json .HostConfig.Privileged}} "
            "{{json .HostConfig.CapDrop}} {{json .HostConfig.Tmpfs}} {{json .HostConfig.SecurityOpt}}")
     lines = subprocess.run(["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True,
@@ -137,3 +138,29 @@ def test_internal_lbs_answer_on_their_vk8s_urls_inside_the_network(host):
     out = subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "mcp-orders", "python", "-c", probe],
                          capture_output=True, text=True, check=True).stdout.strip()
     assert out == host.split(".")[0] + "-lb"
+
+
+@pytest.mark.parametrize("scenario_id, i", [("S0", 2), ("S2", 1)])
+def test_model_steps_reach_ai_gw_through_llm_lb(scenario_id, i):
+    before = httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()["calls"]
+    trace, _ = asyncio.run(run_scenario(scenario_id))
+    step = next(s for s in trace if s["i"] == i)
+    assert (step["kind"], step["status"], step["blocked_by"]) == ("model", 200, None), step
+    assert httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()["calls"] == before + 1
+
+
+def test_ai_gw_admin_is_published_but_llm_lb_refuses_usage():
+    usage = httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()
+    assert usage["mode"] == "stub" and set(usage["budgets"]) == {"fast", "standard", "premium"}
+    assert httpx.get(f"{LLM}/v1/usage", timeout=5).status_code == 401  # no token: JWT first, then sp-llm
+
+
+def test_ai_gw_is_not_reachable_without_the_key_llm_lb_injects():
+    """From inside the network, straight to ai-gw with no x-api-key: the customer's own check refuses it."""
+    probe = ("import urllib.request, urllib.error\n"
+             "req = urllib.request.Request('http://ai-gw:8090/v1/converse', data=b'{}', method='POST',\n"
+             "    headers={'x-model-route': 'fast', 'content-type': 'application/json'})\n"
+             "try:\n    urllib.request.urlopen(req, timeout=3)\nexcept urllib.error.HTTPError as e:\n    print(e.code)")
+    out = subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "mcp-orders", "python", "-c", probe],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    assert out == "401"
