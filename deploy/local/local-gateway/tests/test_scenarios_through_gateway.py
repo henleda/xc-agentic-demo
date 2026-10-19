@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ai_gw.models import StubModel
 from copperline_common.credentials import client_secret
 from copperline_common.expect import evaluate, select_block
 from copperline_common.personas import Personas
@@ -123,7 +124,8 @@ def test_allowed_model_steps_reach_ai_gw_through_llm_lb(stack, scenario_id, i, r
     trace, _ = asyncio.run(run_scenario(stack, scenario_id))
     step = next(s for s in trace if s["i"] == i)
     assert (step["kind"], step["status"], step["blocked_by"]) == ("model", 200, None), step
-    assert step["result_preview"].startswith("(stub model)")
+    # The scenario's own canned reply, not the default: x-demo-scenario made it through llm-lb (local stand-in for R34)
+    assert step["result_preview"] == StubModel().scenarios[scenario_id]
     usage = stack.usage.snapshot()
     assert usage["by_route"][route]["calls"] == 1
     agent = by_id(SCENARIOS, scenario_id).agent

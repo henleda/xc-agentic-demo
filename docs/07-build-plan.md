@@ -38,7 +38,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 
 - `make check` passes.
 - With `make local-up` running, `scripts/run_scenario.py --all --env local` passes every scenario that has an `expect.local` block.
-- S0 works against real Bedrock from the laptop, using AWS credentials and `DEMO_STUB_MODEL=false`.
+- S0 works against real Bedrock: on the devbox (its instance role holds the credentials), with `LOCAL_STUB_MODEL=false` and `ROUTE_*` set (see `deploy/local/README.md`). `GET 127.0.0.1:8190/v1/usage` must report `"mode": "bedrock"` and S0's model step a real `model_id`, so a stub reply can never pass for it.
 
 ## Phase 2: Deploy to vK8s with plain LBs (about 2 days)
 

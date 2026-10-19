@@ -17,13 +17,26 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 
 | Container | Plays | Published on 127.0.0.1 |
 |---|---|---|
-| `idp`, `erp-mock`, `mcp-catalog`, `mcp-orders`, `mcp-inventory`, `mcp-refunds` | the services | erp-mock admin **8181** only |
+| `idp`, `erp-mock`, `ai-gw`, `mcp-catalog`, `mcp-orders`, `mcp-inventory`, `mcp-refunds` | the services | erp-mock admin **8181** and ai-gw admin **8190** only |
 | `shop-lb`, `ops-lb`, `partner-lb` | the public front doors | **8001**, **8002**, **8003** |
 | `tools-lb`, `llm-lb`, `idp-lb`, `erp-lb` | the internal LBs, on the network aliases `tools.agentic-demo`, `llm.agentic-demo`, `idp.agentic-demo` and `erp.agentic-demo`, port 80 | 8011, 8012, 8013, 8014 (debugging and tests only; nothing like them exists in XC) |
 
-Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The agents, ai-gw, partner-api and cockpit are added in later Phase 1 steps. Until then, their routes answer **503** from the gateway.
+Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The agents, partner-api and cockpit are added in later Phase 1 steps. Until then, their routes answer **503** from the gateway.
 
-Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 13 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
+Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 14 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
+
+## ai-gw: stub or real Bedrock
+
+ai-gw runs in **stub mode** by default (canned replies, no AWS). To call real Bedrock, set these in the repo-root `.env` (or export them in the shell, which wins), then `make local-up` again:
+
+```
+LOCAL_STUB_MODEL=false
+ROUTE_FAST=<Bedrock model or inference-profile ID>      # at least one route
+ROUTE_STANDARD=...
+AWS_REGION=us-east-1
+```
+
+`compose.sh` passes only these names (plus `BUDGET_TOKENS_*`) from `.env` to compose, via `local_env.py`. It refuses `LOCAL_STUB_MODEL=false` with no route. **Bedrock mode works on the devbox only**: ai-gw's credentials come from the instance role, and no AWS credentials are ever passed into a container. `curl -s 127.0.0.1:8190/v1/usage` shows `"mode": "stub"` or `"bedrock"`.
 
 ## local-gateway: what it does, and what it does not
 
@@ -38,7 +51,7 @@ One process plays **one** XC load balancer (`LB_NAME`), from `deploy/xc/intent/2
 Every response the gateway makes itself is JSON, carries `x-local-gateway: <lb>`, never `x-copperline-origin`, and its body says `local-gateway — NOT XC`. `copperline_common.xcblock` then classifies:
 
 - the gateway's **4xx** (400, 401, 403, 404, 405) as `blocked_by: xc`, reason starting `local-gateway (NOT XC)`;
-- the gateway's **5xx** (502, 503, 504) as `blocked_by: network`, reason `upstream unreachable behind LB (HTTP …)`, per its rule for a 5xx behind an LB. Until ai-gw exists (step 6), that is what an allowed model step gets.
+- the gateway's **5xx** (502, 503, 504) as `blocked_by: network`, reason `upstream unreachable behind LB (HTTP …)`, per its rule for a 5xx behind an LB.
 
 Responses from a pool pass through unchanged. Each request is logged as one `lb_request` line with `decision` (`allowed`, `denied`, or `upstream_error` when the policy allowed it but the pool failed), the matching `policy_rule`, and the `pool`.
 

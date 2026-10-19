@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from ai_gw.models import StubModel
 from copperline_common.credentials import client_secret
 from copperline_common.expect import evaluate, select_block
 from copperline_common.outbound import new_http_client
@@ -142,11 +143,16 @@ def test_internal_lbs_answer_on_their_vk8s_urls_inside_the_network(host):
 
 @pytest.mark.parametrize("scenario_id, i", [("S0", 2), ("S2", 1)])
 def test_model_steps_reach_ai_gw_through_llm_lb(scenario_id, i):
-    before = httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()["calls"]
+    agent = by_id(SCENARIOS, scenario_id).agent
+    before = httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()
     trace, _ = asyncio.run(run_scenario(scenario_id))
+    after = httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()
     step = next(s for s in trace if s["i"] == i)
-    assert (step["kind"], step["status"], step["blocked_by"]) == ("model", 200, None), step
-    assert httpx.get(f"{AIGW_ADMIN}/v1/usage", timeout=5).json()["calls"] == before + 1
+    seen = json.dumps({"step": step, "usage_before": before["by_agent"], "usage_after": after["by_agent"]})[:3000]
+    assert (step["kind"], step["status"], step["blocked_by"]) == ("model", 200, None), seen
+    assert step["result_preview"] == StubModel().scenarios[scenario_id], seen  # x-demo-scenario got through llm-lb
+    calls = [usage["by_agent"].get(agent, {}).get("calls", 0) for usage in (before, after)]
+    assert calls[1] == calls[0] + 1, seen
 
 
 def test_ai_gw_admin_is_published_but_llm_lb_refuses_usage():
