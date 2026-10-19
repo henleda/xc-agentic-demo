@@ -39,6 +39,28 @@ def test_every_intent_pool_has_a_local_url():
     assert names == set(POOLS)
 
 
+def test_every_local_pool_url_matches_its_compose_service():
+    """The in-process tests route by hostname only, so a wrong port or scheme in pools.yaml would pass them. Check
+    each pool against the port its compose service's healthcheck uses. Services not built yet must be absent."""
+    import re
+
+    compose = yaml.safe_load((REPO / "deploy/local/docker-compose.yaml").read_text())["services"]
+    for pool, url in POOLS.items():
+        match = re.fullmatch(r"http://([a-z0-9-]+):(\d+)", url)
+        assert match, f"{pool}: {url} must be http://<compose service>:<port>"
+        service, port = match.group(1), match.group(2)
+        if service not in compose:
+            continue  # added in a later step; the gateway answers 503 for it until then
+        health = " ".join(compose[service]["healthcheck"]["test"])
+        assert f"127.0.0.1:{port}/" in health, f"{pool} -> {url}, but {service} listens on {health}"
+
+
+def test_some_pools_point_at_running_services():
+    compose = yaml.safe_load((REPO / "deploy/local/docker-compose.yaml").read_text())["services"]
+    running = [pool for pool, url in POOLS.items() if url.split("//")[1].split(":")[0] in compose]
+    assert {"op-idp", "op-erp", "op-mcp-catalog", "op-mcp-orders", "op-mcp-inventory", "op-mcp-refunds"} <= set(running)
+
+
 def test_field_lists_do_not_overlap():
     assert not (EMULATED & NOT_EMULATED) and not (EMULATED & WHERE_SERVED) and not (NOT_EMULATED & WHERE_SERVED)
 

@@ -117,11 +117,16 @@ def test_every_container_runs_like_a_vk8s_pod():
     ids = subprocess.run(["docker", "ps", "-q", "--filter", f"label=com.docker.compose.project={PROJECT}"],
                          capture_output=True, text=True, check=True).stdout.split()
     assert len(ids) == 13, "expected idp, erp-mock, 4 MCP servers and 7 gateways"
-    fmt = "{{.Name}} {{.Config.User}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.Privileged}} {{.HostConfig.CapDrop}}"
-    for line in subprocess.run(["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True,
-                               check=True).stdout.splitlines():
-        name, user, read_only, privileged, cap_drop = line.split(" ", 4)
-        assert (user, read_only, privileged, cap_drop) == ("1000770000:0", "true", "false", "[ALL]"), line
+    fmt = ("{{json .Name}} {{json .Config.User}} {{json .HostConfig.ReadonlyRootfs}} {{json .HostConfig.Privileged}} "
+           "{{json .HostConfig.CapDrop}} {{json .HostConfig.Tmpfs}} {{json .HostConfig.SecurityOpt}}")
+    lines = subprocess.run(["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True,
+                           check=True).stdout.splitlines()
+    for line in lines:
+        name, user, read_only, privileged, cap_drop, tmpfs, security_opt = (json.loads(f) for f in line.split(" "))
+        assert (user, read_only, privileged, cap_drop) == ("1000770000:0", True, False, ["ALL"]), name
+        assert "/tmp" in (tmpfs or {}), f"{name}: no tmpfs /tmp"
+        assert "no-new-privileges:true" in (security_opt or []), f"{name}: no no-new-privileges"
+
 
 
 @pytest.mark.parametrize("host", ["tools.agentic-demo", "llm.agentic-demo", "idp.agentic-demo", "erp.agentic-demo"])

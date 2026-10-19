@@ -2,8 +2,9 @@
 
 This is the step-5 checkpoint in-process: allowed calls succeed, S1 / S3a / S5 are denied by the local-gateway
 (blocked_by: xc, labelled NOT XC), and S1b passes the gateway and is rejected by the MCP server (blocked_by: server).
-No expect.local block asserts a model step, which is just as well: ai-gw arrives in step 6, so a model step here
-gets no response (blocked_by: network) and the plan carries on.
+No expect.local block asserts an allowed model step, which is just as well: ai-gw arrives in step 6, so llm-lb
+answers an allowed model call itself with HTTP 503 (blocked_by: network) and the plan carries on. A model call that
+sp-llm denies (S5 step 3) is already a gateway 403.
 """
 
 import asyncio
@@ -92,15 +93,16 @@ def test_s1b_passes_the_gateway_and_the_server_rejects_the_mismatch(stack):
 
 
 def test_s5_full_trace_shape_locally(stack):
-    """Beyond expect.local: machine tokens are issued (0, 1), tools and the export probe are gateway 403s (2, 5),
-    and exfil fails at the network (4). The model step (3) is a connection error until ai-gw exists."""
+    """Beyond expect.local: machine tokens are issued (0, 1), the tool call, the premium model call and the export
+    probe are gateway 403s (2, 3, 5: sp-tools, sp-llm, sp-tools), and exfil fails at the network (4)."""
     trace, _ = asyncio.run(run_scenario(stack, "S5"))
     by_i = {s["i"]: s for s in trace}
     assert by_i[0]["status"] == 200 and by_i[0]["identity"]["obo_role"] == "none"
     assert by_i[1]["status"] == 200
-    assert (by_i[2]["status"], by_i[2]["blocked_by"]) == (403, "xc")
+    for i in (2, 3, 5):
+        assert (by_i[i]["status"], by_i[i]["blocked_by"]) == (403, "xc"), by_i[i]
+        assert by_i[i]["reason"].startswith("local-gateway (NOT XC)")
     assert (by_i[4]["status"], by_i[4]["blocked_by"]) == (None, "network")
-    assert (by_i[5]["status"], by_i[5]["blocked_by"]) == (403, "xc")
 
 
 def test_s3b_issues_exactly_one_refund_through_both_hops(stack):

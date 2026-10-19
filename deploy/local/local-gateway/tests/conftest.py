@@ -110,7 +110,8 @@ async def echo(request: Request) -> JSONResponse:
         "method": request.method,
         "path": request.scope["path"],  # not request.url: it splits a decoded "?" out of the path
         "query": request.scope["query_string"].decode(),
-        "headers": [[name.decode(), value.decode()] for name, value in request.headers.raw],
+        "headers": [[name.decode("latin-1"), value.decode("latin-1")] for name, value in request.headers.raw],
+        "headers_raw": [[name.decode("latin-1"), value.hex()] for name, value in request.headers.raw],  # exact bytes
         "body": (await request.body()).decode(),
     }
     return JSONResponse(body, status_code=int(request.headers.get("x-echo-status", "200")),
@@ -119,7 +120,8 @@ async def echo(request: Request) -> JSONResponse:
 
 @pytest.fixture
 def echo_gateway(tmp_path, jwks_path):
-    """echo_gateway(lb_name) -> an AsyncClient that talks to that LB, with every pool replaced by an echo app."""
+    """echo_gateway(lb_name, intent_dir=INTENT) -> an AsyncClient that talks to that LB, with every pool replaced by
+    an echo app. Pass intent_dir to run the gateway on an edited copy of the intent files."""
     pools = tmp_path / "pools-echo.yaml"
     names = [line.split(":", 1)[0] for line in POOLS.read_text().splitlines() if line and not line.startswith("#")]
     pools.write_text("".join(f"{name}: http://echo:8080\n" for name in names))
@@ -127,19 +129,32 @@ def echo_gateway(tmp_path, jwks_path):
     mesh.apps["echo"] = Starlette(routes=[Route("/{path:path}", echo, methods=["GET", "POST", "PUT", "DELETE"])])
     upstream = httpx.AsyncClient(transport=mesh)
 
-    def _client(lb_name: str) -> httpx.AsyncClient:
-        app = gateway(lb_name, jwks_path, upstream, pools)
+    def _client(lb_name: str, intent_dir: Path = INTENT) -> httpx.AsyncClient:
+        settings = GatewaySettings(lb_name=lb_name, intent_dir=intent_dir, pools_file=pools, jwks_path=jwks_path)
+        app = create_gateway(settings, http=upstream, env={"GATEWAY_API_KEY": GATEWAY_KEY})
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lb")
 
     return _client
 
 
+class Unreachable(httpx.AsyncBaseTransport):
+    """Every pool fails the same way: a refused connection, or (timeout=True) a read timeout."""
+
+    def __init__(self, timeout: bool = False) -> None:
+        self.timeout = timeout
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if self.timeout:
+            raise httpx.ReadTimeout("pool too slow", request=request)
+        raise httpx.ConnectError(f"connection refused: {request.url.host}", request=request)
+
+
 @pytest.fixture
 def unreachable_gateway(jwks_path):
-    """unreachable_gateway(lb_name) -> an AsyncClient for that LB whose pools all refuse connections."""
+    """unreachable_gateway(lb_name, timeout=False) -> an AsyncClient for that LB whose pools all fail."""
 
-    def _client(lb_name: str) -> httpx.AsyncClient:
-        app = gateway(lb_name, jwks_path, httpx.AsyncClient(transport=Mesh()))
+    def _client(lb_name: str, timeout: bool = False) -> httpx.AsyncClient:
+        app = gateway(lb_name, jwks_path, httpx.AsyncClient(transport=Unreachable(timeout)))
         return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://lb")
 
     return _client
