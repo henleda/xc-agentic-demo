@@ -14,19 +14,20 @@ One image runs three Deployments (shopper, storeops, refunds) and the insights-n
 | `DEMO_SAFE_MODE` | Run scenario plans when a trigger matches |
 | `SCENARIOS_DIR` | Default `/app/scenarios`; the scenarios are baked into the image |
 | `MODE` | `server` (default) or `batch` |
-| `TRACE_SINK` | `response` (server mode) or `stdout` (batch) |
+| `TRACE_SINK` | `response` (server mode) or `stdout` (batch). Informational: the mode decides |
+| `EXFIL_TEST_URL` | **Batch mode, required.** S5's step i=4 posts here. Without it the plan does not expand and the job exits 2 with no `TRACE` lines. The vK8s CronJob sets it from `.env` (rendered by `render_manifests.py`) |
 | `RUN_SALT` | Optional suffix for per-run uniqueness |
-| `MODEL_TIMEOUT_S` | Default 65. How long the agent waits for llm-lb. It must be **longer** than llm-lb's own route timeout (locally 60 s; in XC see `docs/08` R39), so a slow model shows up as llm-lb's or ai-gw's 504 in the trace, never as an agent-side timeout. Tool and IdP calls use 10 s |
+| `MODEL_TIMEOUT_S` | Default 65. How long the agent waits to **read** a model reply through llm-lb. It must be **longer** than llm-lb's own route timeout (locally 60 s; in XC see `docs/08` R39), so a slow model shows up as llm-lb's or ai-gw's 504 in the trace, never as an agent-side timeout. Scripted plans and batch jobs run every hop on this client, but every **connect** gives up after 10 s, so a destination that silently drops packets (S5's exfil step behind the network policy) costs 10 s, not 65. Unscripted tool calls and token exchanges use 10 s throughout. The front door must wait longer than a whole turn (`docs/08` R41) |
 | `PORT` | Default 8080 |
 
-Start it with `python -m agent_runtime`. In server mode it refuses to start without `AGENT_CLIENT_SECRET` or any of the three LB URLs; it also refuses an agent config that declares a tool missing from `tools.yaml`.
+Start it with `python -m agent_runtime`. In server mode it refuses to start without `AGENT_CLIENT_SECRET` or any of the three LB URLs; it also refuses an agent config that declares a tool missing from `tools.yaml`, a missing `tools.yaml` or `personas.yaml` next to `AGENT_CONFIG`, or YAML it cannot parse. Every refusal is one `agent_config_error` JSON line and exit 2.
 
 ## Server mode
 
 `POST /v1/chat` (body and response shapes in `docs/02-agents.md`). A missing bearer token is 401; a malformed body (no messages, more than 50, a non-string content over 8000 characters, or a last message that is not from the user) is 400 `bad_request`.
 
 1. Read the user token from `Authorization`. The token has already been validated by XC at shop-lb or ops-lb.
-2. Exchange it at `${IDP_BASE_URL}/token/exchange` for two tokens, one with audience `copperline-tools` and one with `copperline-llm`. Cache them per `(obo_sub, aud)` until 30 seconds before expiry.
+2. Exchange it at `${IDP_BASE_URL}/token/exchange` for two tokens, one with audience `copperline-tools` and one with `copperline-llm`. Cache them per `(obo_sub, aud)`; a cached token is used only while it has at least 150 s left (see **Token cache**).
 3. Pick a path:
    - **Safe mode, trigger matched:** execute the scenario `plan` step by step (see `scenarios/README.md`).
    - **Otherwise, the normal loop:**
@@ -35,7 +36,9 @@ Start it with `python -m agent_runtime`. In server mode it refuses to start with
      3. Repeat until the model stops or `max_steps` model calls have been made. At the limit the agent stops and says so.
      4. Tool names: the model sees `orders__get_order_status` (Bedrock allows no dots) and the runtime maps it back. A tool the model names that is **not declared** is never called: the trace shows it with `reason: "not a declared tool"`.
      5. Each tool result goes back to the model as a `toolResult` block. A blocked or failed call is sent as one line from `xcblock.model_feedback`, e.g. "Tool call denied by policy (HTTP 403).", with `status: "error"`, so the model can recover (CLAUDE.md rule 9).
-   - **Closing call on scripted turns.** If the plan has no `final_reply` and does not end with a model step, the runtime makes one more model call (`i: null`, `scripted: false`). It sends the conversation plus a one-line-per-tool summary of the plan's results, **no tools**, and the header `x-demo-scenario: <id>`, so ai-gw's stub can return that scenario's canned reply. S3a and S3b end this way.
+   - **Closing call on scripted turns.** If the plan has no `final_reply` and does not end with a model step, the runtime makes one more model call (`i: null`, `scripted: false`). It sends the conversation plus the same tool summary scripted model steps get (`plan_executor.tool_summary`: one line per tool with its status and result text, or the denial line), **no tools**, and the header `x-demo-scenario: <id>`, so ai-gw's stub can return that scenario's canned reply. S3a and S3b end this way. If the plan's own final model step failed, there is **no** closing call: the turn replies with a short apology instead of retrying the model.
+   - **Bad input.** Message content that is not valid UTF-8 text (JSON allows a lone `\ud800`) is a 400 before anything runs.
+   - **Logs.** Every agent log line carries `agent_id`; each call (scripted or not) is one `plan_step` line with its `step_request_id`, which is the `x-request-id` the LBs and services log for that call.
 4. Every outbound call carries:
    - `Authorization: Bearer <agent token>`
    - `x-request-id`
@@ -46,7 +49,7 @@ Start it with `python -m agent_runtime`. In server mode it refuses to start with
 5. Wrap every call in a trace Step and classify the outcome with `copperline_common.xcblock`.
 6. Return `{reply, scenario, trace}`. `scenario` is the matched scenario ID, or null for the normal loop.
 
-**Token cache.** Agent tokens are cached per `(obo_sub, aud)` until 30 s before expiry, so one human's token is never used for another. Each real exchange is a trace step (`kind: token`, `i: null`, with `identity`); a cache hit adds none. A refused exchange is a trace step too, and the calls that needed that token go out without one, so llm-lb or tools-lb shows its own 401.
+**Token cache.** Agent tokens are cached per `(obo_sub, aud)`, so one human's token is never used for another. They live 300 s, and a cached one is served only while it has at least 150 s left (`TOKEN_REFRESH_MARGIN_S`), so a token can never expire part-way through a turn (S4 is a model call plus 40 tool calls) and show up as a misleading `jwt validation` block. Each real exchange is a trace step (`kind: token`, `i: null`, with `identity`); a cache hit adds none. A refused exchange is a trace step too, and the calls that needed that token go out without one, so llm-lb or tools-lb shows its own 401.
 
 ## Batch mode (insights-nightly)
 

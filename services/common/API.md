@@ -318,6 +318,9 @@ class PlanRun:
     steps: list[Step]; reply: str | None; stopped_early: bool
 
 async def run_plan(scenario: Scenario, ctx: ExecContext, *, start_n: int = 1) -> PlanRun
+def tool_summary(earlier: list[Step]) -> str | None
+    # the "Results of the tool calls you made:" text model steps get (see below); None when there are no tool steps.
+    # agent-runtime reuses it for its closing call, so both say the same thing.
 ```
 
 `run_plan` behaves like this:
@@ -351,7 +354,7 @@ async def run_plan(scenario: Scenario, ctx: ExecContext, *, start_n: int = 1) ->
 - **Reply.**
   - If `scenario.final_reply` is a str, that is the reply.
   - Otherwise, if the last executed step is a model step with text, that text is the reply.
-  - Otherwise `reply=None`, and the caller (agent-runtime) makes the extra unscripted model call.
+  - Otherwise `reply=None`. The caller (agent-runtime) makes the extra unscripted model call only when the last executed step is **not** a model step; if the plan's own final model step failed or returned no text, the turn ends without a second try (a failed model call is never retried as a "closing" call).
 - **Errors.** `run_plan` never raises for HTTP or network problems. It raises only `PlanError` for bad plans or unresolved variables, before any step runs.
 
 ## expect.py

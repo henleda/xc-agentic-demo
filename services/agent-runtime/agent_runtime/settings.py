@@ -1,7 +1,7 @@
 """agent-runtime settings: the agent's YAML (AGENT_CONFIG) plus env. Read once at startup; tests build them directly."""
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from copperline_common.config import load_yaml
@@ -60,7 +60,6 @@ class Settings:
     model_timeout_s: float = DEFAULT_MODEL_TIMEOUT_S
     tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S
     port: int = 8080
-    extra_env: dict[str, str] = field(default_factory=dict)  # tests: env for plan ${VAR} substitution
 
     @classmethod
     def from_env(cls) -> "Settings":

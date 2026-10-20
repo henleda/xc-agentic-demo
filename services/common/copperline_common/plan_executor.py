@@ -237,7 +237,8 @@ async def _run_tool(step: PlanStep, ctx: ExecContext, request_id: str) -> Step:
     return trace
 
 
-def _tool_summary(earlier: list[Step]) -> str | None:
+def tool_summary(earlier: list[Step]) -> str | None:
+    """The plain-text summary of earlier tool steps that model calls get (None when there are none)."""
     lines = []
     for step in earlier:
         if step.kind != "tool":
@@ -257,7 +258,7 @@ async def _run_model(step: PlanStep, ctx: ExecContext, request_id: str, earlier:
     route = (step.spec.get("model") or {}).get("route") or ctx.model_route_default
     url = f"{ctx.llm_base_url.rstrip('/')}/v1/converse"
     chat = list(ctx.conversation)
-    summary = _tool_summary(earlier)
+    summary = tool_summary(earlier)
     if summary:
         chat.append({"role": "user", "content": summary})
     body: dict = {"messages": chat_to_converse(chat), "max_tokens": MODEL_MAX_TOKENS}

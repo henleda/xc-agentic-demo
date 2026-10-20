@@ -180,6 +180,7 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
     """The real services and agents behind the real gateway logic; ai-gw in stub mode."""
     for client_id, secret in SECRETS.items():
         monkeypatch.setenv(client_id.upper().replace("-", "_") + "_SECRET", secret)  # plan token steps read env
+    monkeypatch.setenv("EXFIL_TEST_URL", "https://exfil.invalid/rows")  # as compose sets it; plans read process env
     pem = rsa_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                 serialization.NoEncryption()).decode()
     mesh = Mesh()
@@ -203,8 +204,7 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
         agent_settings = AgentSettings(
             agent=AgentConfig.load(REPO / f"config/agents/{agent_id}.yaml"), client_secret=SECRETS[f"agent-{agent_id}"],
             tools_base_url="http://tools.agentic-demo", llm_base_url="http://llm.agentic-demo",
-            idp_base_url="http://idp.agentic-demo", config_dir=config_dir, scenarios_dir=REPO / "scenarios",
-            extra_env={"EXFIL_TEST_URL": "https://exfil.invalid/rows"})
+            idp_base_url="http://idp.agentic-demo", config_dir=config_dir, scenarios_dir=REPO / "scenarios")
         agent = build_agent(agent_settings, http=http, model_http=http)
         mesh.apps[f"{agent_id}-agent"] = create_agent_app(agent_settings, agent)
     for host, lb_name in LB_HOSTS.items():

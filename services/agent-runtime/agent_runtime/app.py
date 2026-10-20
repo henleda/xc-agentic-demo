@@ -1,5 +1,6 @@
 """agent-runtime server mode: POST /v1/chat behind shop-lb or ops-lb. Contract: docs/02-agents.md."""
 
+import httpx
 from copperline_common.jwt import bearer_token
 from copperline_common.logging import log_event
 from copperline_common.outbound import new_http_client
@@ -11,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from agent_runtime.agent import Agent, AuthError
+from agent_runtime.agent import CONNECT_TIMEOUT_S, Agent, AuthError
 from agent_runtime.settings import Settings
 
 MAX_MESSAGES = 50
@@ -27,7 +28,9 @@ def build_agent(settings: Settings, *, http=None, model_http=None) -> Agent:
         scenarios=load_scenarios(settings.scenarios_dir),
         personas=Personas.load(settings.config_dir / "personas.yaml"),
         http=http or new_http_client(timeout=settings.tool_timeout_s),
-        model_http=model_http or new_http_client(timeout=settings.model_timeout_s),
+        # Model calls (and scripted plans, which run on this client) may read for model_timeout_s; connects fail fast.
+        model_http=model_http or new_http_client(timeout=httpx.Timeout(settings.model_timeout_s,
+                                                                       connect=CONNECT_TIMEOUT_S)),
     )
 
 
@@ -72,6 +75,9 @@ async def chat(request: Request) -> JSONResponse:
                 or not isinstance(message.get("content"), str) or len(message["content"]) > MAX_MESSAGE_CHARS):
             return _bad(f"each message needs role user or assistant and a string content of at most "
                         f"{MAX_MESSAGE_CHARS} characters")
+        if not _utf8_ok(message["content"]):
+            # JSON allows "\ud800", which cannot be sent on; refuse before any plan step has side effects.
+            return _bad("message content is not valid UTF-8 text")
     if messages[-1]["role"] != "user":
         return _bad("the last message must be from the user")
     hint = body.get("scenario_hint")
@@ -82,3 +88,11 @@ async def chat(request: Request) -> JSONResponse:
     except AuthError as e:
         return JSONResponse({"error": "unauthorized", "message": str(e)}, status_code=401)
     return JSONResponse({"reply": result.reply, "scenario": result.scenario, "trace": result.trace})
+
+
+def _utf8_ok(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True

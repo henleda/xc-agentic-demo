@@ -7,6 +7,7 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from agent_runtime.agent import NO_REPLY
 from ai_gw.models import StubModel
 from copperline_common.expect import evaluate, select_block
 from copperline_common.personas import Personas
@@ -54,7 +55,11 @@ def test_expect_local_passes_through_the_agent(stack, scenario_id, capsys):
     assert body["scenario"] == scenario_id
     result = evaluate(select_block(by_id(SCENARIOS, scenario_id).expect, "local"), body["trace"], estate_delta=delta)
     assert result.ok, "\n".join(f"{c.description}: {c.detail}" for c in result.checks if not c.ok)
-    assert body["reply"]
+    assert body["reply"] and body["reply"] != NO_REPLY
+    # Every model call (plan or closing) got through llm-lb to ai-gw. expect.local checks tool steps only, so without
+    # this a broken token hand-off to the plan would hide behind a working closing call.
+    assert [(s["status"], s["blocked_by"]) for s in body["trace"] if s["kind"] == "model"] == [(200, None)] * len(
+        [s for s in body["trace"] if s["kind"] == "model"]), body["trace"]
     assert "server_authz_deny" not in capsys.readouterr().out  # the fabric stand-in denied first
 
 
@@ -71,6 +76,7 @@ def test_the_agent_exchanges_tokens_once_per_audience_and_caches_them(stack):
     identity = token_steps[0]["identity"]
     assert (identity["obo_sub"], identity["agent_id"]) == ("alex.rivera", "shopper")
     assert not [s for s in second if s["kind"] == "token"]  # cache hit: no exchange, no trace row
+    assert [(s["status"], s["blocked_by"]) for s in second] == [(200, None)] * len(second)  # ...and the tokens work
 
 
 def test_scripted_steps_are_marked_scripted_and_the_closing_call_is_not(stack):
@@ -98,7 +104,8 @@ def test_a_message_matching_no_trigger_runs_the_normal_loop(stack):
     assert kinds == [("model", False), ("tool", False), ("model", False)]
     tool = next(s for s in body["trace"] if s["kind"] == "tool")
     assert tool["tool"] == "orders.get_order_status" and tool["status"] == 200
-    assert body["reply"]
+    assert [(s["status"], s["blocked_by"]) for s in body["trace"] if s["kind"] == "model"] == [(200, None)] * 2
+    assert body["reply"] not in ("", NO_REPLY)
 
 
 def test_a_tool_the_fabric_denies_is_fed_back_and_the_turn_still_ends_well(stack):
@@ -108,7 +115,8 @@ def test_a_tool_the_fabric_denies_is_fed_back_and_the_turn_still_ends_well(stack
     body = response.json()
     tool = next(s for s in body["trace"] if s["kind"] == "tool")
     assert (tool["tool"], tool["status"], tool["blocked_by"]) == ("refunds.issue_refund", 403, "xc")
-    assert response.status_code == 200 and body["reply"]
+    assert response.status_code == 200 and body["reply"] not in ("", NO_REPLY)
+    assert (body["trace"][-1]["kind"], body["trace"][-1]["status"]) == ("model", 200)  # recovered after the denial
     assert stack.db.state()["refunds_issued"] == 0
 
 
@@ -154,3 +162,19 @@ def test_bad_chat_bodies_are_400_from_the_agent(stack, body):
         return await stack.http.post("http://shop-lb/v1/chat", json=body, headers={"Authorization": f"Bearer {token}"})
     response = asyncio.run(go())
     assert response.status_code == 400 and response.headers["x-copperline-origin"] == "shopper-agent"
+
+
+def test_scenario_hint_picks_between_two_matching_triggers(stack):
+    """Mallory's message carries both S1's and S1b's trigger text; the hint decides which plan runs."""
+    message = by_id(SCENARIOS, "S1").message + " " + by_id(SCENARIOS, "S1b").message
+    first = asyncio.run(chat(stack, "mallory.x", "shopper", message, hint="S1b")).json()
+    assert first["scenario"] == "S1b"
+    second = asyncio.run(chat(stack, "mallory.x", "shopper", message, hint="S1")).json()
+    assert second["scenario"] == "S1"
+
+
+def test_scenario_hint_never_overrides_persona_or_trigger(stack):
+    """docs/02: the trigger and persona must still match."""
+    wrong_persona = asyncio.run(chat(stack, "alex.rivera", "shopper", by_id(SCENARIOS, "S1").message, hint="S1"))
+    wrong_message = asyncio.run(chat(stack, "mallory.x", "shopper", "What tents do you sell?", hint="S1"))
+    assert wrong_persona.json()["scenario"] is None and wrong_message.json()["scenario"] is None

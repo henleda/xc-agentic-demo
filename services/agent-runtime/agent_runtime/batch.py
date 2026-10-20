@@ -10,11 +10,14 @@ import json
 import os
 import sys
 
+import httpx
 from copperline_common.logging import log_event
 from copperline_common.outbound import new_http_client
 from copperline_common.plan_executor import ExecContext, Step, run_plan
+from copperline_common.requestid import agent_id_var
 from copperline_common.scenarios import PlanError, load_scenarios
 
+from agent_runtime.agent import CONNECT_TIMEOUT_S
 from agent_runtime.settings import Settings
 
 TRACE_PREFIX = "TRACE "
@@ -35,6 +38,7 @@ def print_step(step: Step) -> None:
 
 async def run_batch(settings: Settings, *, http=None) -> int:
     """Returns the process exit code."""
+    agent_id_var.set(settings.agent.agent_id)
     try:
         scenario = job_scenario(settings)
     except RuntimeError as e:
@@ -44,8 +48,9 @@ async def run_batch(settings: Settings, *, http=None) -> int:
     env.setdefault("TOOLS_BASE_URL", settings.tools_base_url)
     env.setdefault("LLM_BASE_URL", settings.llm_base_url)
     env.setdefault("IDP_BASE_URL", settings.idp_base_url)
-    env.update(settings.extra_env)
-    client = http or new_http_client(timeout=settings.model_timeout_s)
+    # One client for every hop: model reads may take model_timeout_s, but a connect that the network policy silently
+    # drops (S5's exfil step) gives up after CONNECT_TIMEOUT_S, keeping the S5 beat short.
+    client = http or new_http_client(timeout=httpx.Timeout(settings.model_timeout_s, connect=CONNECT_TIMEOUT_S))
     ctx = ExecContext(http=client, tools_base_url=settings.tools_base_url, llm_base_url=settings.llm_base_url,
                       idp_base_url=settings.idp_base_url, tokens={}, agent_id=settings.agent.agent_id,
                       obo_sub="none", conversation=[{"role": "user", "content": scenario.message}],

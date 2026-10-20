@@ -2,10 +2,12 @@
 
     handle_chat(user_token, messages, scenario_hint) -> ChatResult(reply, scenario, trace)
 
-1. Exchange the user token at idp-lb for a tools token and an llm token (cached per (obo_sub, aud) until 30 s before
-   expiry). Each real exchange is a trace step (kind token, i null); a cache hit adds nothing.
-2. Safe mode and a scenario trigger matches: run its plan (copperline_common.plan_executor.run_plan). If the plan
-   yields no reply, make one closing model call (i null): no tools, with x-demo-scenario so the stub can answer.
+1. Exchange the user token at idp-lb for a tools token and an llm token, cached per (obo_sub, aud). A cached token is
+   used only while it has TOKEN_REFRESH_MARGIN_S left, so it cannot expire part-way through a turn. Each real
+   exchange is a trace step (kind token, i null); a cache hit adds nothing.
+2. Safe mode and a scenario trigger matches: run its plan (copperline_common.plan_executor.run_plan). If the plan has
+   no final_reply and did not end with a model step, make one closing model call (i null): no tools, with
+   x-demo-scenario so the stub can answer. A plan whose final model step failed is not retried.
 3. Otherwise the normal loop: model call with the declared tools -> run the tool calls it asks for -> feed the
    results back -> repeat until it answers in text or max_steps model calls have been made.
 
@@ -37,8 +39,9 @@ from copperline_common.plan_executor import (
     ExecContext,
     Step,
     run_plan,
+    tool_summary,
 )
-from copperline_common.requestid import REQUEST_ID_HEADER, new_request_id, request_id_var
+from copperline_common.requestid import REQUEST_ID_HEADER, agent_id_var, new_request_id, request_id_var
 from copperline_common.scenarios import Scenario, find_scenario
 from copperline_common.tokens import TokenStore, exchange
 from copperline_common.tool_schemas import ToolDef, fq_from_model_name
@@ -48,6 +51,13 @@ from agent_runtime.settings import Settings
 
 NO_REPLY = "Sorry, I couldn't complete that request right now."
 TOOL_RESULT_LIMIT = 4000  # characters of a tool result handed back to the model
+# Agent tokens live 300 s. Serve a cached one only while it has this long left, so it outlives a whole turn (S4 is a
+# model call plus 40 tool calls; the normal loop up to max_steps model calls) and never expires mid-turn as a
+# confusing "jwt validation" block. Half the lifetime still lets back-to-back turns reuse it.
+TOKEN_REFRESH_MARGIN_S = 150
+# Plan and batch hops share one client with the long model read timeout; connects still fail fast, so a destination
+# that silently drops packets (S5's exfil step behind a network policy) costs seconds, not the model timeout.
+CONNECT_TIMEOUT_S = 10.0
 
 
 class AuthError(Exception):
@@ -71,7 +81,7 @@ class Agent:
         self.personas = personas
         self.http = http  # tools and idp: short timeout
         self.model_http = model_http  # llm-lb: longer timeout (settings.model_timeout_s)
-        self.tokens = token_store or TokenStore()
+        self.tokens = token_store or TokenStore(skew_s=TOKEN_REFRESH_MARGIN_S)
         # Only the declared tools are offered to the model, the over-declared one included (S1's misconfiguration).
         unknown = [fq for fq in self.config.declared_tools if fq not in tools]
         if unknown:
@@ -85,6 +95,7 @@ class Agent:
         sub = claims.get("sub")
         if not isinstance(sub, str) or not sub:
             raise AuthError("user token has no sub")
+        agent_id_var.set(self.config.agent_id)  # log lines name the agent (the inbound token is the user's)
         trace: list[Step] = []
         tokens = await self._agent_tokens(user_token, sub, trace)
 
@@ -132,6 +143,7 @@ class Agent:
                 tokens[name] = result.token
             else:
                 step.result_preview = (result.http.body_text or "")[:PREVIEW_LIMIT] or None
+            self._log_step(step)
             trace.append(step)
         return tokens
 
@@ -148,8 +160,10 @@ class Agent:
         trace.extend(run.steps)
         if run.reply:
             return run.reply
+        if run.steps and run.steps[-1].kind == "model":
+            return NO_REPLY  # the plan's own final model call failed; a "closing" call would just retry it
         # No final_reply and the plan did not end in a model step: one closing call, unscripted (i null), no tools.
-        summary = list(messages) + [{"role": "user", "content": _plan_summary(run.steps)}]
+        summary = list(messages) + [{"role": "user", "content": _closing_prompt(run.steps)}]
         step, text = await self._model_call(chat_to_converse(summary), tokens, sub, tools=None, scenario=scenario.id,
                                             n=len(trace) + 1)
         trace.append(step)
@@ -161,7 +175,6 @@ class Agent:
         env.setdefault("TOOLS_BASE_URL", self.settings.tools_base_url)
         env.setdefault("LLM_BASE_URL", self.settings.llm_base_url)
         env.setdefault("IDP_BASE_URL", self.settings.idp_base_url)
-        env.update(self.settings.extra_env)
         return env
 
     # ---- normal loop --------------------------------------------------------------------------------------------
@@ -183,9 +196,9 @@ class Agent:
             for use in uses:
                 tool_step, result_text = await self._tool_call(use, tokens, sub, n=len(trace) + 1)
                 trace.append(tool_step)
+                ok = tool_step.status == 200 and not tool_step.blocked_by and not tool_step.is_error
                 results.append({"toolResult": {"toolUseId": use["toolUseId"], "content": [{"text": result_text}],
-                                               "status": "error" if tool_step.blocked_by or tool_step.is_error
-                                               else "success"}})
+                                               "status": "success" if ok else "error"}})
             conversation.append({"role": "user", "content": results})
         # max_steps model calls and the model still wants tools: stop and say so rather than loop forever.
         log_event("max_steps_reached", level="warning", agent=self.config.agent_id, max_steps=self.config.max_steps)
@@ -204,6 +217,7 @@ class Agent:
         if fq not in self.config.declared_tools:
             # The model named a tool it was never offered: refuse locally, never call it.
             step.reason = "not a declared tool"
+            self._log_step(step)
             return step, f"Unknown tool {use.get('name')!r}."
         result = await client.call_tool(server, tool, args, token=tokens.get(TOOLS_TOKEN),
                                         extra_headers=self._identity_headers(request_id, sub))
@@ -215,6 +229,7 @@ class Agent:
         if preview is not None:
             step.result_truncated = len(preview) > PREVIEW_LIMIT
             step.result_preview = preview[:PREVIEW_LIMIT]
+        self._log_step(step)
         if step.blocked_by or step.status != 200:
             return step, model_feedback("tool", step.status, step.blocked_by, step.reason)
         return step, (text or "")[:TOOL_RESULT_LIMIT]
@@ -250,26 +265,27 @@ class Agent:
         if preview is not None:
             step.result_truncated = len(preview) > PREVIEW_LIMIT
             step.result_preview = preview[:PREVIEW_LIMIT]
+        self._log_step(step)
         if raw:
             return step, result.json if result.status == 200 else None
         return step, text
+
+    @staticmethod
+    def _log_step(step: Step) -> None:
+        """Same shape as run_plan's plan_step line, so scripted and unscripted calls read alike in the pod log."""
+        log_event("plan_step", scenario=None, i=None, kind=step.kind, target=step.target, tool=step.tool,
+                  status=step.status, blocked_by=step.blocked_by, latency_ms=step.latency_ms,
+                  step_request_id=step.request_id)
 
     def _identity_headers(self, request_id: str, sub: str) -> dict[str, str]:
         # Informational, for the customer gateway's logs (docs/08 R9); XC judges the token, not these.
         return {REQUEST_ID_HEADER: request_id, "x-agent-id": self.config.agent_id, "x-obo-sub": sub}
 
 
-def _plan_summary(steps: list[Step]) -> str:
-    """What the closing model call is told about a scripted turn: one line per tool call and its outcome."""
-    lines = []
-    for step in steps:
-        if step.kind != "tool":
-            continue
-        if step.blocked_by or step.status != 200 or step.is_error:
-            outcome = model_feedback("tool", step.status, step.blocked_by, step.reason)
-        else:
-            outcome = (step.result_preview or "")[:1500]
-        lines.append(f"- {step.tool} -> {outcome}")
-    if not lines:
+def _closing_prompt(steps: list[Step]) -> str:
+    """What the closing model call is told about a scripted turn: the same tool summary scripted model steps get
+    (copperline_common.plan_executor.tool_summary), so an MCP isError result reads as its error text, not success."""
+    summary = tool_summary(steps)
+    if summary is None:
         return "Please reply to the user."
-    return "Results of the tool calls you made:\n" + "\n".join(lines) + "\nNow reply to the user."
+    return summary + "\nNow reply to the user."
