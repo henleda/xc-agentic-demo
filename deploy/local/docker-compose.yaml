@@ -43,6 +43,22 @@ x-mcp-erp-env: &mcp-erp-env
   SVC_CLIENT_ID: svc-mcp
   SVC_CLIENT_SECRET: ${SVC_MCP_SECRET:?run deploy/local/compose.sh, not docker compose}
 
+x-agent: &agent
+  <<: *hardened
+  build: { context: ../.., dockerfile: services/agent-runtime/Dockerfile }
+  image: copperline/agent-runtime:local
+  volumes: ["./.run/config:/config:ro"]
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+
+x-agent-env: &agent-env   # the same runtime-env the vK8s ConfigMap gives every agent
+  TOOLS_BASE_URL: http://tools.agentic-demo
+  LLM_BASE_URL: http://llm.agentic-demo
+  IDP_BASE_URL: http://idp.agentic-demo
+  MCP_PROTOCOL_VERSION: "2026-07-28"
+  DEMO_SAFE_MODE: "true"
+
 x-gateway: &gateway
   <<: *hardened
   build: { context: ../.., dockerfile: deploy/local/local-gateway/Dockerfile }
@@ -102,6 +118,40 @@ services:
     healthcheck:
       <<: *healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2)"]
+
+  # ---- agents (one image; AGENT_CONFIG picks which) ----------------------------------------------------------
+  shopper-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      AGENT_CONFIG: /config/shopper.yaml
+      AGENT_CLIENT_SECRET: ${AGENT_SHOPPER_SECRET:?run deploy/local/compose.sh, not docker compose}
+  storeops-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      AGENT_CONFIG: /config/storeops.yaml
+      AGENT_CLIENT_SECRET: ${AGENT_STOREOPS_SECRET:?run deploy/local/compose.sh, not docker compose}
+  refunds-agent:
+    <<: *agent
+    environment:
+      <<: *agent-env
+      AGENT_CONFIG: /config/refunds.yaml
+      AGENT_CLIENT_SECRET: ${AGENT_REFUNDS_SECRET:?run deploy/local/compose.sh, not docker compose}
+  # The shadow job (S5). Not started by `up`: run it with `deploy/local/compose.sh run --rm insights-nightly`.
+  # It holds a COPIED storeops secret, as in the tenant. EXFIL_TEST_URL does not resolve locally, which stands in
+  # for the vK8s network policy (compose has none).
+  insights-nightly:
+    <<: *agent
+    profiles: [jobs]
+    healthcheck: { disable: true }
+    environment:
+      <<: *agent-env
+      AGENT_CONFIG: /config/insights-nightly.yaml
+      MODE: batch
+      AGENT_CLIENT_SECRET: ${AGENT_STOREOPS_SECRET:?run deploy/local/compose.sh, not docker compose}
+      AGENT_STOREOPS_SECRET: ${AGENT_STOREOPS_SECRET:?run deploy/local/compose.sh, not docker compose}
+      EXFIL_TEST_URL: https://exfil.invalid/rows
 
   mcp-catalog:
     <<: *mcp

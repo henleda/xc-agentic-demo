@@ -12,6 +12,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from agent_runtime.app import build_agent
+from agent_runtime.app import create_app as create_agent_app
+from agent_runtime.settings import AgentConfig
+from agent_runtime.settings import Settings as AgentSettings
 from ai_gw.app import create_admin_app as create_aigw_admin_app
 from ai_gw.app import create_gateway_app as create_aigw_app
 from ai_gw.settings import Settings as AigwSettings
@@ -173,7 +177,7 @@ class Stack:
 
 @pytest.fixture
 def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
-    """The real services behind the real gateway logic; ai-gw in stub mode. The agents are not built yet."""
+    """The real services and agents behind the real gateway logic; ai-gw in stub mode."""
     for client_id, secret in SECRETS.items():
         monkeypatch.setenv(client_id.upper().replace("-", "_") + "_SECRET", secret)  # plan token steps read env
     pem = rsa_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
@@ -195,6 +199,14 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
     usage = Usage(aigw_settings.budgets)
     mesh.apps["ai-gw"] = create_aigw_app(aigw_settings, usage)
     mesh.apps["ai-gw-admin"] = create_aigw_admin_app(aigw_settings, usage)
+    for agent_id in ("shopper", "storeops", "refunds"):
+        agent_settings = AgentSettings(
+            agent=AgentConfig.load(REPO / f"config/agents/{agent_id}.yaml"), client_secret=SECRETS[f"agent-{agent_id}"],
+            tools_base_url="http://tools.agentic-demo", llm_base_url="http://llm.agentic-demo",
+            idp_base_url="http://idp.agentic-demo", config_dir=config_dir, scenarios_dir=REPO / "scenarios",
+            extra_env={"EXFIL_TEST_URL": "https://exfil.invalid/rows"})
+        agent = build_agent(agent_settings, http=http, model_http=http)
+        mesh.apps[f"{agent_id}-agent"] = create_agent_app(agent_settings, agent)
     for host, lb_name in LB_HOSTS.items():
         mesh.apps[host] = gateway(lb_name, jwks_path, http)
 

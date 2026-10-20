@@ -18,12 +18,14 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 | Container | Plays | Published on 127.0.0.1 |
 |---|---|---|
 | `idp`, `erp-mock`, `ai-gw`, `mcp-catalog`, `mcp-orders`, `mcp-inventory`, `mcp-refunds` | the services | erp-mock admin **8181** and ai-gw admin **8190** only |
+| `shopper-agent`, `storeops-agent`, `refunds-agent` | the agents, reached through the front doors: `POST 127.0.0.1:8001/v1/chat`, `8002/storeops/v1/chat`, `8002/refunds/v1/chat` | none |
+| `insights-nightly` | the shadow job (S5). Not started by `up`: `deploy/local/compose.sh run --rm insights-nightly` | none |
 | `shop-lb`, `ops-lb`, `partner-lb` | the public front doors | **8001**, **8002**, **8003** |
 | `tools-lb`, `llm-lb`, `idp-lb`, `erp-lb` | the internal LBs, on the network aliases `tools.agentic-demo`, `llm.agentic-demo`, `idp.agentic-demo` and `erp.agentic-demo`, port 80 | 8011, 8012, 8013, 8014 (debugging and tests only; nothing like them exists in XC) |
 
-Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The agents, partner-api and cockpit are added in later Phase 1 steps. Until then, their routes answer **503** from the gateway.
+Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. partner-api and the cockpit are added in later Phase 1 steps. Until then, their routes answer **503** from the gateway.
 
-Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 14 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
+Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 17 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
 
 ## ai-gw: stub or real Bedrock
 

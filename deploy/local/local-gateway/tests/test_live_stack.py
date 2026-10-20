@@ -118,7 +118,7 @@ def test_mcp_servers_never_had_to_deny():
 def test_every_container_runs_like_a_vk8s_pod():
     ids = subprocess.run(["docker", "ps", "-q", "--filter", f"label=com.docker.compose.project={PROJECT}"],
                          capture_output=True, text=True, check=True).stdout.split()
-    assert len(ids) == 14, "expected idp, erp-mock, ai-gw, 4 MCP servers and 7 gateways"
+    assert len(ids) == 17, "expected idp, erp-mock, ai-gw, 3 agents, 4 MCP servers and 7 gateways"
     fmt = ("{{json .Name}} {{json .Config.User}} {{json .HostConfig.ReadonlyRootfs}} {{json .HostConfig.Privileged}} "
            "{{json .HostConfig.CapDrop}} {{json .HostConfig.Tmpfs}} {{json .HostConfig.SecurityOpt}}")
     lines = subprocess.run(["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True,
@@ -170,3 +170,46 @@ def test_ai_gw_is_not_reachable_without_the_key_llm_lb_injects():
     out = subprocess.run(["docker", "compose", "-p", PROJECT, "exec", "-T", "mcp-orders", "python", "-c", probe],
                          capture_output=True, text=True, check=True).stdout.strip()
     assert out == "401"
+
+
+CHAT_PATH = {"shopper": "/v1/chat", "storeops": "/storeops/v1/chat", "refunds": "/refunds/v1/chat"}
+
+
+def chat_through_front_door(scenario) -> tuple[dict, dict]:
+    door = "shop-lb" if PERSONAS.get(scenario.persona)["role"] == "customer" else "ops-lb"
+    with httpx.Client(timeout=90) as client:
+        login = client.post(f"{FRONT_DOORS[door]}/auth/demo-login", json={"sub": scenario.persona})
+        assert login.status_code == 200, login.text
+        before = client.get(f"{ERP_ADMIN}/admin/state").json()
+        response = client.post(f"{FRONT_DOORS[door]}{CHAT_PATH[scenario.agent]}",
+                               json={"messages": [{"role": "user", "content": scenario.message}],
+                                     "scenario_hint": scenario.id},
+                               headers={"Authorization": f"Bearer {login.json()['access_token']}"})
+        after = client.get(f"{ERP_ADMIN}/admin/state").json()
+    assert response.status_code == 200, response.text
+    return response.json(), {key: after[key] - before[key] for key in ("refunds_issued", "stock_writes")}
+
+
+@pytest.mark.parametrize("scenario_id", ["S0", "S1", "S1b", "S2", "S3a", "S3b", "S4"])
+def test_expect_local_passes_through_the_agent_containers(scenario_id):
+    """The way the cockpit will run them: log in at the front door, chat with the agent, read its trace."""
+    scenario = by_id(SCENARIOS, scenario_id)
+    body, delta = chat_through_front_door(scenario)
+    assert body["scenario"] == scenario_id and body["reply"]
+    result = evaluate(select_block(scenario.expect, "local"), body["trace"], estate_delta=delta)
+    failed = [f"{c.description}: {c.detail}" for c in result.checks if not c.ok]
+    assert result.ok, "\n".join(failed) + "\n" + json.dumps(body["trace"], indent=1)[:4000]
+
+
+def test_s5_runs_as_a_batch_job_and_exits_0_with_everything_blocked():
+    """deploy/local/compose.sh run --rm insights-nightly: the shadow job with a copied storeops secret."""
+    job = subprocess.run([str(REPO / "deploy/local/compose.sh"), "run", "--rm", "-T", "insights-nightly"],
+                         capture_output=True, text=True, timeout=180)
+    assert job.returncode == 0, job.stderr[-2000:]
+    trace = [json.loads(line[len("TRACE "):]) for line in job.stdout.splitlines() if line.startswith("TRACE ")]
+    result = evaluate(select_block(by_id(SCENARIOS, "S5").expect, "local"), trace)
+    assert result.ok, json.dumps(trace, indent=1)[:4000]
+    by_i = {s["i"]: s for s in trace}
+    assert [(by_i[i]["status"], by_i[i]["blocked_by"]) for i in range(6)] == [
+        (200, None), (200, None), (403, "xc"), (403, "xc"), (None, "network"), (403, "xc")]
+    assert by_i[0]["identity"]["obo_role"] == "none"
