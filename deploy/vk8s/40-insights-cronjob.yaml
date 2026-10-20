@@ -34,6 +34,9 @@ spec:
                 # i.e. AGENT_STOREOPS_SECRET. Without it the IdP answers 401 invalid_client and S5 i=0/i=1 fail.
                 - name: AGENT_STOREOPS_SECRET
                   valueFrom: { secretKeyRef: { name: agent-credentials, key: agent-storeops } }   # same copied secret
+                # S5 step i=4 POSTs here; the plan refuses to start without it (exit 2, no TRACE lines). An endpoint you
+                # control, from .env; render_manifests.py substitutes it. R31: reachable without the network policy.
+                - { name: EXFIL_TEST_URL, value: "${EXFIL_TEST_URL}" }
                 - { name: TRACE_SINK, value: "stdout" }   # batch traces: JSON to stdout; cockpit reads them via kubectl logs (see services/agent-runtime/README.md)
               envFrom: [{ configMapRef: { name: runtime-env } }]
               volumeMounts: [{ name: cfg, mountPath: /config }, { name: tmp, mountPath: /tmp }]

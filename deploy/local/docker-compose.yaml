@@ -196,11 +196,11 @@ services:
     ports: ["127.0.0.1:8014:80"]
   shop-lb:
     <<: *gateway
-    environment: { LB_NAME: shop-lb }
+    environment: { LB_NAME: shop-lb, UPSTREAM_TIMEOUT_S: "600" }   # longer than a whole agent turn (docs/08 R41)
     ports: ["127.0.0.1:8001:8080"]
   ops-lb:
     <<: *gateway
-    environment: { LB_NAME: ops-lb }
+    environment: { LB_NAME: ops-lb, UPSTREAM_TIMEOUT_S: "600" }   # longer than a whole agent turn (docs/08 R41)
     ports: ["127.0.0.1:8002:8080"]
   partner-lb:
     <<: *gateway

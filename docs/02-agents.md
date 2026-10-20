@@ -88,7 +88,7 @@ In `config/agents/shopper.yaml`, `declared_tools` includes `refunds.issue_refund
 
   The trace includes the agent's own token exchanges as `kind: "token"` steps with `i: null`, but only when an exchange actually happened (not on a cache hit).
 - **Loop:**
-  1. Exchange the user token for tools and llm tokens. Cache each until 30 seconds before expiry.
+  1. Exchange the user token for tools and llm tokens. Cache each per human; serve a cached token only while it has at least 150 s of its 300 s left, so it cannot expire mid-turn.
   2. Call the model with the declared tools.
   3. Execute the tool calls.
   4. Repeat, up to `max_steps` (default 8). Scripted plans are not bounded by `max_steps` (`scenarios/README.md`).

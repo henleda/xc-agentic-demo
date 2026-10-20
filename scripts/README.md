@@ -5,7 +5,7 @@
 | `gen_policy.py` | **working** | Matrix → generated service-policy intent and consistency check (agent configs, rate-limit sync). Tests in `scripts/tests/` |
 | `gen_keys.py` | **working** | Create the IdP RSA key, every client secret and the AI gateway key in `.secrets/` (gitignored), and write `deploy/xc/generated/jwks.json`. See below |
 | `render_secrets.py` | **working** | `.secrets/` + `.env` → `deploy/vk8s/secrets/rendered/*.yaml` (gitignored), from the templates in `deploy/vk8s/secrets/` |
-| `render_manifests.py` | to build (Phase 2) | Substitute `${REGISTRY}`/`${IMAGE_TAG}`, render the `agent-configs` ConfigMap from `config/`, write `deploy/vk8s/rendered/` |
+| `render_manifests.py` | to build (Phase 2) | Substitute `${REGISTRY}`, `${IMAGE_TAG}` and `${EXFIL_TEST_URL}` (S5 exits 2 without it) from `.env`, render the `agent-configs` ConfigMap from `config/`, write `deploy/vk8s/rendered/`. Fail on any `${...}` left unrendered |
 | `build_images.sh` | to build (Phase 2) | Build multi-arch images, run each with `--user 1000770000:0` as a smoke check, push |
 | `check_bedrock.py` | to build | Run on EC2: one Converse call per route through the VPC endpoint |
 | `smoke_test.py` | to build | `--env local\|tenant [--no-security]`: health checks via LBs, one login, one tool call, one model call, ERP not resolvable from RE (via debug Job) |
