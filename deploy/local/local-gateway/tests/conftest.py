@@ -33,6 +33,8 @@ from local_gateway.app import Settings as GatewaySettings
 from local_gateway.app import create_app as create_gateway
 from mcp_servers.app import Settings as McpSettings
 from mcp_servers.app import create_app as create_mcp_app
+from partner_api.app import create_app as create_partner_app
+from partner_api.settings import Settings as PartnerSettings
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -177,7 +179,7 @@ class Stack:
 
 @pytest.fixture
 def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
-    """The real services and agents behind the real gateway logic; ai-gw in stub mode."""
+    """The real services, agents and partner-api behind the real gateway logic; ai-gw in stub mode."""
     for client_id, secret in SECRETS.items():
         monkeypatch.setenv(client_id.upper().replace("-", "_") + "_SECRET", secret)  # plan token steps read env
     monkeypatch.setenv("EXFIL_TEST_URL", "https://exfil.invalid/rows")  # as compose sets it; plans read process env
@@ -207,6 +209,7 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
             idp_base_url="http://idp.agentic-demo", config_dir=config_dir, scenarios_dir=REPO / "scenarios")
         agent = build_agent(agent_settings, http=http, model_http=http)
         mesh.apps[f"{agent_id}-agent"] = create_agent_app(agent_settings, agent)
+    mesh.apps["partner-api"] = create_partner_app(PartnerSettings(issuer=ISSUER, jwks_path=str(jwks_path)))
     for host, lb_name in LB_HOSTS.items():
         mesh.apps[host] = gateway(lb_name, jwks_path, http)
 

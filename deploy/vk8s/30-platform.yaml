@@ -111,20 +111,15 @@ spec:
         image: ${REGISTRY}/partner-api:${IMAGE_TAG}
         ports:
         - containerPort: 8080
+        # No ERP access and no secrets: the PO data is generated in-process (services/partner-api/README.md).
+        # The token keys come from the IdP via IDP_BASE_URL (runtime-env) -> idp-lb -> /.well-known/jwks.json.
         env:
-        - name: ERP_CLIENT_ID
-          value: svc-mcp
-        - name: ERP_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: agent-credentials
-              key: svc-mcp
+        - name: ISSUER
+          value: https://idp.copperline.demo
         envFrom:
         - configMapRef:
             name: runtime-env
         volumeMounts:
-        - name: cfg
-          mountPath: /config
         - name: tmp
           mountPath: /tmp
         readinessProbe:
@@ -145,9 +140,6 @@ spec:
             cpu: 500m
             memory: 256Mi
       volumes:
-      - name: cfg
-        configMap:
-          name: agent-configs
       - name: tmp
         emptyDir: {}
 ---

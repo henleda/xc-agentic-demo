@@ -118,7 +118,7 @@ def test_mcp_servers_never_had_to_deny():
 def test_every_container_runs_like_a_vk8s_pod():
     ids = subprocess.run(["docker", "ps", "-q", "--filter", f"label=com.docker.compose.project={PROJECT}"],
                          capture_output=True, text=True, check=True).stdout.split()
-    assert len(ids) == 17, "expected idp, erp-mock, ai-gw, 3 agents, 4 MCP servers and 7 gateways"
+    assert len(ids) == 18, "expected idp, erp-mock, ai-gw, partner-api, 3 agents, 4 MCP servers and 7 gateways"
     fmt = ("{{json .Name}} {{json .Config.User}} {{json .HostConfig.ReadonlyRootfs}} {{json .HostConfig.Privileged}} "
            "{{json .HostConfig.CapDrop}} {{json .HostConfig.Tmpfs}} {{json .HostConfig.SecurityOpt}}")
     lines = subprocess.run(["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True,
@@ -213,3 +213,21 @@ def test_s5_runs_as_a_batch_job_and_exits_0_with_everything_blocked():
     assert [(by_i[i]["status"], by_i[i]["blocked_by"]) for i in range(6)] == [
         (200, None), (200, None), (403, "xc"), (403, "xc"), (None, "network"), (403, "xc")]
     assert by_i[0]["identity"]["obo_role"] == "none"
+
+
+def test_s6_through_the_partner_front_door():
+    """The Granite Supply plan against the containers, token via partner-lb /auth/token, as the cockpit will run it.
+    Locally only the documented read is asserted (expect.local); the shadow endpoint, WAF and rate limit are XC's."""
+    os.environ["GRANITE_SUPPLY_SECRET"]  # loaded from .secrets by the autouse fixture; KeyError here means it is not
+    scenario = by_id(SCENARIOS, "S6")
+
+    async def go():
+        async with new_http_client(timeout=15) as http:
+            ctx = ExecContext(http=http, tools_base_url=TOOLS, llm_base_url=LLM, idp_base_url=IDP, tokens={},
+                              lb_base_urls=(FRONT_DOORS["partner-lb"],), scenario_id="S6", env=ENV)
+            return [s.to_dict() for s in (await run_plan(scenario, ctx)).steps]
+
+    trace = asyncio.run(go())
+    result = evaluate(select_block(scenario.expect, "local"), trace)
+    assert result.ok, json.dumps(trace[:5], indent=1)
+    assert trace[0]["identity"]["sub"] == "granite-supply" and trace[2]["status"] == 200  # shadow endpoint answers

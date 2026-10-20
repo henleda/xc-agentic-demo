@@ -119,6 +119,17 @@ services:
       <<: *healthcheck
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=2)"]
 
+  partner-api:
+    <<: *hardened
+    build: { context: ../.., dockerfile: services/partner-api/Dockerfile }
+    image: copperline/partner-api:local
+    environment:
+      ISSUER: https://idp.copperline.demo
+      IDP_BASE_URL: http://idp.agentic-demo   # keys from the IdP through idp-lb, as in vK8s
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+
   # ---- agents (one image; AGENT_CONFIG picks which) ----------------------------------------------------------
   shopper-agent:
     <<: *agent

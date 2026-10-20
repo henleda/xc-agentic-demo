@@ -145,3 +145,45 @@ def test_agents_cannot_read_gateway_usage_through_llm_lb(stack):
         return await stack.http.get(f"{LLM}/v1/usage", headers={"Authorization": f"Bearer {token}"})
     response = asyncio.run(go())
     assert response.status_code == 403 and response.headers["x-local-gateway"] == "llm-lb"
+
+
+def run_s6(stack) -> list[dict]:
+    """S6 the way the cockpit's Partner tab runs it: the plan executor plays Granite Supply, with no agent and no
+    human, and gets its own client-credentials token through partner-lb's /auth/token route."""
+    scenario = by_id(SCENARIOS, "S6")
+    env = {**ENV, "PARTNER_BASE_URL": "http://partner-lb"}
+    ctx = ExecContext(http=stack.http, tools_base_url=TOOLS, llm_base_url=LLM, idp_base_url=IDP, tokens={},
+                      lb_base_urls=("http://partner-lb",), scenario_id="S6", env=env)
+    return [step.to_dict() for step in asyncio.run(run_plan(scenario, ctx)).steps]
+
+
+def test_s6_expect_local_passes_through_partner_lb(stack):
+    trace = run_s6(stack)
+    result = evaluate(select_block(by_id(SCENARIOS, "S6").expect, "local"), trace)
+    assert result.ok, json.dumps(trace[:5], indent=1)
+
+
+def test_s6_locally_shows_what_xc_must_add(stack):
+    """partner-lb locally does routing and JWT only. The token is real (partner role, via partner-lb), the documented
+    read works, and the shadow endpoint, the injection and the burst all succeed: those 403s/429s are XC's job
+    (OpenAPI fall-through block, WAF, rate limit; docs/08 R38). This pins the honest local baseline."""
+    trace = run_s6(stack)
+    by_i = {s["i"]: s for s in trace}
+    assert by_i[0]["kind"] == "token" and by_i[0]["status"] == 200
+    assert by_i[0]["identity"] == {"sub": "granite-supply", "aud": "copperline-partner"}
+    assert by_i[0]["target"] == "http://partner-lb/auth/token"
+    assert [(by_i[i]["status"], by_i[i]["blocked_by"]) for i in (1, 2, 3)] == [(200, None), (200, None), (202, None)]
+    assert "DE89" in by_i[2]["result_preview"]  # the shadow cost sheet really answers; XC must block it
+    assert len(trace) == 54 and all(s["status"] == 200 for s in trace[4:])  # 50 reads, no local rate limit
+
+
+def test_partner_lb_requires_the_partner_token_on_v1(stack):
+    async def go():
+        no_token = await stack.http.get("http://partner-lb/v1/purchase-orders")
+        login = await stack.http.post("http://shop-lb/auth/demo-login", json={"sub": "alex.rivera"})
+        shopper = await stack.http.get("http://partner-lb/v1/purchase-orders",
+                                       headers={"Authorization": f"Bearer {login.json()['access_token']}"})
+        return no_token, shopper
+    no_token, shopper = asyncio.run(go())
+    assert no_token.status_code == 401 and no_token.headers["x-local-gateway"] == "partner-lb"
+    assert shopper.status_code == 401 and shopper.headers["x-local-gateway"] == "partner-lb"  # aud copperline-shop
