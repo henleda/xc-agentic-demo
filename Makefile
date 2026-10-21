@@ -1,4 +1,4 @@
-.PHONY: check policy lint test local-up local-down local-check local-scenarios local-smoke devbox-up devbox-run devbox-ssh devbox-tunnel devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+.PHONY: check policy lint test local-up local-down local-check local-scenarios local-smoke devbox-up devbox-run devbox-ssh devbox-tunnel devbox-results devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
 
 # All Python runs through uv so everyone gets the same interpreter (3.12, see .python-version) and deps.
 PY := uv run python
@@ -31,6 +31,8 @@ devbox-ssh:
 	deploy/devbox/devbox.sh ssh
 devbox-tunnel:
 	deploy/devbox/devbox.sh tunnel
+devbox-results:                    ## copy scenario results from the box (the sync never deletes them there)
+	deploy/devbox/devbox.sh results
 devbox-destroy:
 	deploy/devbox/devbox.sh destroy
 
@@ -47,8 +49,8 @@ deploy-xc:
 
 smoke:
 	$(PY) scripts/smoke_test.py --env tenant
-scenarios:
-	$(PY) scripts/run_scenario.py --all --env tenant
+scenarios:                         ## definition of done: every scenario, three runs in a row (Phase 2+)
+	$(PY) scripts/run_scenario.py --all --env tenant --runs 3
 latency:
 	$(PY) scripts/measure_latency.py --env tenant
 reset:

@@ -30,6 +30,7 @@ class DemoEnv:
     tools_base_url: str | None = None  # internal LBs: only reachable directly in local mode
     llm_base_url: str | None = None
     idp_base_url: str | None = None
+    erp_lb_url: str | None = None  # erp-lb: CE-only in the tenant, so only reachable directly in local mode
     erp_admin_url: str | None = None
     aigw_admin_url: str | None = None
     plan_env: dict[str, str] = field(default_factory=dict)  # ${VAR} values for plans run by this script
@@ -47,6 +48,7 @@ def local() -> DemoEnv:
         tools_base_url=tools,
         llm_base_url=llm,
         idp_base_url=idp,
+        erp_lb_url="http://127.0.0.1:8014",
         erp_admin_url="http://127.0.0.1:8181",
         aigw_admin_url="http://127.0.0.1:8190",
         # S6's plan runs here (the cockpit's role); S5's EXFIL_TEST_URL is set inside the compose job itself.
@@ -64,6 +66,27 @@ def tenant() -> DemoEnv:
         front_doors={"shop-lb": f"https://shop.{domain}", "ops-lb": f"https://ops.{domain}", "partner-lb": partner},
         plan_env={"PARTNER_BASE_URL": partner},
     )
+
+
+def job_env(env: DemoEnv) -> dict[str, str]:
+    """What the S5 batch job's own environment holds, for --dry. The job's plan runs inside its container, so its
+    variables come from where the container gets them, not from this shell:
+      local   docker-compose.yaml's insights-nightly service (EXFIL_TEST_URL is set there)
+      tenant  the runtime-env ConfigMap (deploy/vk8s/00-config.yaml) plus EXFIL_TEST_URL, which render_manifests.py
+              takes from .env (deploy/vk8s/40-insights-cronjob.yaml). Missing from .env means missing in the pod."""
+    import yaml
+
+    if env.name == "local":
+        compose = yaml.safe_load((ROOT / "deploy/local/docker-compose.yaml").read_text())
+        service = compose["services"]["insights-nightly"]
+        return {k: str(v) for k, v in service["environment"].items() if "${" not in str(v)}
+    config_maps = {doc["metadata"]["name"]: doc["data"]
+                   for doc in yaml.safe_load_all((ROOT / "deploy/vk8s/00-config.yaml").read_text()) if doc}
+    values = dict(config_maps["runtime-env"])
+    exfil = os.environ.get("EXFIL_TEST_URL") or read_env_file(ROOT / ".env").get("EXFIL_TEST_URL", "")
+    if exfil:
+        values["EXFIL_TEST_URL"] = exfil
+    return values
 
 
 def for_name(name: str) -> DemoEnv:

@@ -1,7 +1,6 @@
 """scripts/run_scenario.py: the parts that decide what runs and what counts as a pass. Running scenarios against a real
 stack is covered live (make local-scenarios on the devbox)."""
 
-from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -68,8 +67,7 @@ def test_estate_not_observed_fails_a_scenario_that_expects_it():
 ])
 def test_front_door_rows_are_classified_like_trace_steps(status, headers, blocked_by):
     response = httpx.Response(status, headers=headers, text="{}", request=httpx.Request("POST", "http://x"))
-    response.elapsed = timedelta(milliseconds=5)
-    row = run_scenario.front_door_row(3, response)
+    row = run_scenario.front_door_row(3, response, started=0.0)
     assert (row["kind"], row["attempt"], row["status"], row["blocked_by"]) == ("front_door", 3, status, blocked_by)
 
 
@@ -90,15 +88,27 @@ def test_dry_run_of_every_scenario_passes_locally():
     assert run_scenario.dry_run(run_scenario.ordered(SCENARIOS, None), demo_env.local()) == 0
 
 
-def test_dry_run_never_hides_exfil_test_url_outside_the_local_job(monkeypatch):
-    """The step-7 review found S5 failing in the tenant on a missing EXFIL_TEST_URL. A dry run must not paper over it
-    except where compose really sets it (the local job)."""
+def test_tenant_dry_run_checks_s5_against_what_the_pod_will_get(monkeypatch, tmp_path):
+    """The step-7 review found S5 failing in the tenant on a missing EXFIL_TEST_URL. The dry run reads the job's env
+    from the manifests (runtime-env ConfigMap + EXFIL_TEST_URL from .env), so it fails exactly when the pod would."""
+    import demo_env
+
+    monkeypatch.setattr(demo_env, "ROOT", REPO)
+    monkeypatch.setenv("DEMO_DOMAIN", "example.test")
+    monkeypatch.delenv("EXFIL_TEST_URL", raising=False)
+    monkeypatch.setattr(demo_env, "read_env_file", lambda path: {})  # an .env without EXFIL_TEST_URL
+    s5 = by_id(SCENARIOS, "S5")
+    assert run_scenario.dry_run([s5], demo_env.tenant()) == 1
+    monkeypatch.setattr(demo_env, "read_env_file", lambda path: {"EXFIL_TEST_URL": "https://bin.example.test/x"})
+    assert run_scenario.dry_run([s5], demo_env.tenant()) == 0
+
+
+def test_local_dry_run_reads_the_jobs_env_from_compose(monkeypatch):
     import demo_env
 
     monkeypatch.delenv("EXFIL_TEST_URL", raising=False)
-    s5 = by_id(SCENARIOS, "S5")
-    tenantish = demo_env.DemoEnv(name="tenant", front_doors={}, plan_env={"TOOLS_BASE_URL": "http://t"})
-    assert run_scenario.dry_run([s5], tenantish) == 1
+    env = demo_env.job_env(demo_env.local())
+    assert env["EXFIL_TEST_URL"] == "https://exfil.invalid/rows" and env["TOOLS_BASE_URL"].startswith("http://")
 
 
 def test_the_cli_needs_ids_or_all():
@@ -127,33 +137,213 @@ def test_every_scenario_is_drivable():
         assert scenario.agent in demo_env.CHAT_PATH, scenario.id
 
 
-def test_the_smoke_test_reports_every_hop_without_crashing(monkeypatch, capsys):
-    """Every hop ok, then one hop missing and one hop blocked: each is a line, never a traceback."""
-    import smoke_test
+# ---- step-9 review: errors are data, verdicts, main() --------------------------------------------------------------
 
-    def fake_stack(trace):
-        def handler(request):
-            path = request.url.path
-            if path.endswith("/auth/demo-login"):
-                return httpx.Response(200, json={"access_token": "t"})
-            if path == "/v1/chat":
-                return httpx.Response(200, json={"trace": trace})
-            if path == "/admin/state" and request.url.port == 8014:
-                return httpx.Response(401, json={})
-            return httpx.Response(200, json={"status": "ok"})
-        return httpx.MockTransport(handler)
 
-    real_client = httpx.Client
-    good = [{"kind": k, "status": 200, "blocked_by": None} for k in ("token", "tool", "model")]
-    blocked_model = good[:2] + [{"kind": "model", "status": 403, "blocked_by": "xc", "reason": "service policy"}]
-    for trace, expected in ((good, 0), (blocked_model, 1), (good[:1], 1)):
-        transport = fake_stack(trace)
+import json  # noqa: E402
+import subprocess  # noqa: E402
 
-        def client_on_fake_stack(*args, transport=transport, **kwargs):
-            return real_client(transport=transport, **kwargs)
+import demo_env  # noqa: E402
+from copperline_common.personas import Personas  # noqa: E402
 
-        monkeypatch.setattr(smoke_test.httpx, "Client", client_on_fake_stack)
-        assert smoke_test.main(["--env", "local"]) == expected
-    out = capsys.readouterr().out
-    assert "FAIL  model call through llm-lb  (403 service policy)" in out
-    assert "FAIL  tool call through tools-lb  (not in the trace)" in out
+PERSONAS = Personas.load(REPO / "config/personas.yaml")
+
+
+def fake_client(handler):
+    """Patch httpx.Client inside run_scenario so every request goes to `handler(request)`."""
+    real = httpx.Client
+
+    def make(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return real(transport=httpx.MockTransport(handler), **kwargs)
+    return make
+
+
+@pytest.mark.parametrize("error, says", [
+    (httpx.ConnectError("refused"), "unreachable"),
+    (httpx.ReadTimeout("slow"), "timed out"),
+])
+def test_a_hop_that_is_down_is_this_scenarios_error_not_a_crash(monkeypatch, error, says):
+    def handler(request):
+        error.request = request
+        raise error
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    outcome = run_scenario.run_one(by_id(SCENARIOS, "S0"), demo_env.local(), PERSONAS, "salt1")
+    assert outcome["trace"] == [] and says in outcome["error"]
+
+
+def test_a_body_that_is_not_json_is_an_error_not_a_crash(monkeypatch):
+    def handler(request):
+        if request.url.path.endswith("/auth/demo-login"):
+            return httpx.Response(200, json={"access_token": "t"})
+        if request.url.path == "/admin/state":
+            return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
+        return httpx.Response(200, text="<html>not json</html>")
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    outcome = run_scenario.run_one(by_id(SCENARIOS, "S0"), demo_env.local(), PERSONAS, "salt1")
+    assert "JSONDecodeError" in outcome["error"]
+
+
+@pytest.mark.parametrize("body, status", [({"detail": "x"}, 404), ({"refunds_issued": "a"}, 200), ([], 200)])
+def test_estate_is_none_unless_the_counters_really_came_back(body, status):
+    env = demo_env.local()
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(status, json=body)))
+    assert run_scenario.estate(client, env) is None
+
+
+def test_a_job_that_exits_non_zero_after_some_steps_is_an_error_not_a_pass(monkeypatch):
+    """The step-9 review: S5's local expect only asserts i=2, so a crash after it used to be reported PASS."""
+    lines = [json.dumps({"i": i, "kind": k, "status": s, "blocked_by": b, "scripted": True, "tool": t})
+             for i, k, s, b, t in ((0, "token", 200, None, None), (1, "token", 200, None, None),
+                                   (2, "tool", 403, "xc", "orders.list_customer_orders"))]
+    done = subprocess.CompletedProcess([], 137, stdout="\n".join("TRACE " + line for line in lines), stderr="Killed")
+    monkeypatch.setattr(run_scenario.subprocess, "run", lambda *a, **kw: done)
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(
+        lambda r: httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})))
+    s5 = by_id(SCENARIOS, "S5")
+    result = run_scenario.check(s5, "local", run_scenario.run_one(s5, demo_env.local(), PERSONAS, "x"))
+    assert result["verdict"] == "error" and "exited 137" in result["error"]
+
+
+def test_a_job_that_hangs_is_an_error(monkeypatch):
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout"))
+    monkeypatch.setattr(run_scenario.subprocess, "run", hang)
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(
+        lambda r: httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})))
+    outcome = run_scenario.run_one(by_id(SCENARIOS, "S5"), demo_env.local(), PERSONAS, "x")
+    assert "did not finish" in outcome["error"]
+
+
+def test_an_agent_that_ran_another_scenario_is_an_error_even_if_expect_happens_to_match():
+    s1 = by_id(SCENARIOS, "S1")
+    trace = [{"n": 1, "i": 2, "kind": "tool", "status": 403, "blocked_by": "xc", "is_error": None}]
+    result = run_scenario.check(s1, "local", {"trace": trace, "matched": None,
+                                              "estate_delta": {"refunds_issued": 0, "stock_writes": 0}})
+    assert result["verdict"] == "error" and "normal loop" in result["error"]
+
+
+def test_a_stale_plan_in_the_container_is_an_error():
+    """The agent image bakes scenarios/ in; a plan edited on disk but not rebuilt must not pass."""
+    s3b = by_id(SCENARIOS, "S3b")
+    trace = [{"i": 0, "kind": "tool", "tool": "orders.get_order_details", "scripted": True, "status": 200,
+              "blocked_by": None, "is_error": False},
+             {"i": 1, "kind": "tool", "tool": "refunds.get_refund_status", "scripted": True, "status": 200,
+              "blocked_by": None, "is_error": False}]
+    env = demo_env.local().plan_env
+    result = run_scenario.check(s3b, "local", {"trace": trace, "matched": "S3b",
+                                               "estate_delta": {"refunds_issued": 1, "stock_writes": 0}}, env)
+    assert result["verdict"] == "error" and "make local-up" in result["error"]
+
+
+def test_s7_sends_its_message_repeat_message_times_and_records_each_answer(monkeypatch):
+    chats = []
+
+    def handler(request):
+        if request.url.path.endswith("/auth/demo-login"):
+            return httpx.Response(200, json={"access_token": "t"})
+        if request.url.path == "/admin/state":
+            return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
+        chats.append(json.loads(request.content))
+        return httpx.Response(403, json={"error": "blocked"})  # no origin header: the fabric
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    s7 = by_id(SCENARIOS, "S7")
+    outcome = run_scenario.run_one(s7, demo_env.local(), PERSONAS, "salt1")
+    assert len(chats) == s7.repeat_message and all(c["scenario_hint"] == "S7" for c in chats)
+    assert [(r["attempt"], r["status"], r["blocked_by"]) for r in outcome["trace"]] == [
+        (n, 403, "xc") for n in range(1, s7.repeat_message + 1)]
+
+
+def test_mallory_logs_in_with_the_runs_salt(monkeypatch):
+    logins = []
+
+    def handler(request):
+        if request.url.path.endswith("/auth/demo-login"):
+            logins.append(json.loads(request.content))
+            return httpx.Response(500)
+        return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
+    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    run_scenario.run_one(by_id(SCENARIOS, "S1"), demo_env.local(), PERSONAS, "abc123")
+    assert logins == [{"sub": "mallory.x", "run_salt": "abc123"}]
+
+
+# ---- main(): exit codes, salts, waits, results -----------------------------------------------------------------
+
+
+@pytest.fixture
+def stubbed_main(monkeypatch, tmp_path):
+    """main() with run_one replaced: returns (calls, set_outcome). Results go to tmp_path; sleeps are recorded."""
+    calls, outcomes, sleeps = [], {}, []
+
+    def fake_run_one(scenario, env, personas, run_salt):
+        calls.append((scenario.id, run_salt))
+        return outcomes.get(scenario.id, {"trace": [], "error": "not stubbed"})
+
+    monkeypatch.setattr(run_scenario, "run_one", fake_run_one)
+    monkeypatch.setattr(run_scenario, "ROOT", tmp_path)
+    (tmp_path / "scenarios").symlink_to(REPO / "scenarios")
+    (tmp_path / "config").symlink_to(REPO / "config")
+    monkeypatch.setattr(run_scenario.time, "sleep", sleeps.append)
+    monkeypatch.delenv("RUN_SALT", raising=False)
+    return calls, outcomes, sleeps, tmp_path
+
+
+S1_PASS = {"trace": [  # S1's whole plan as the agent returns it: reviews read, the hijacked model turn, refund denied
+    {"n": 3, "i": 0, "kind": "tool", "tool": "catalog.get_reviews", "status": 200, "blocked_by": None,
+     "is_error": False, "scripted": True},
+    {"n": 4, "i": 1, "kind": "model", "tool": None, "status": 200, "blocked_by": None, "scripted": True},
+    {"n": 5, "i": 2, "kind": "tool", "tool": "refunds.issue_refund", "status": 403, "blocked_by": "xc",
+     "is_error": None, "scripted": True}],
+    "matched": "S1", "estate_delta": {"refunds_issued": 0, "stock_writes": 0}}
+
+
+def test_main_exits_0_only_when_every_checked_scenario_passed(stubbed_main):
+    calls, outcomes, _, _ = stubbed_main
+    outcomes["S1"] = S1_PASS
+    assert run_scenario.main(["S1", "--env", "local"]) == 0
+    refund_allowed = {**S1_PASS["trace"][2], "status": 200, "blocked_by": None, "is_error": False}
+    outcomes["S1"] = {**S1_PASS, "trace": S1_PASS["trace"][:2] + [refund_allowed]}
+    assert run_scenario.main(["S1", "--env", "local"]) == 1
+
+
+def test_main_exits_1_when_nothing_was_checked(stubbed_main):
+    """S7 alone has no local expectations: "0/0 passed" must not be a green run."""
+    assert run_scenario.main(["S7", "--env", "local"]) == 1
+
+
+def test_main_refuses_runs_below_1():
+    with pytest.raises(SystemExit):
+        run_scenario.main(["S1", "--env", "local", "--runs", "0"])
+
+
+def test_each_run_gets_a_fresh_salt_and_the_wait_follows_s4_and_s6(stubbed_main):
+    calls, outcomes, sleeps, _ = stubbed_main
+    outcomes["S1"] = S1_PASS
+    run_scenario.main(["S1", "S4", "--env", "local", "--runs", "3"])
+    salts = [salt for scenario_id, salt in calls if scenario_id == "S1"]
+    assert len(salts) == 3 and len(set(salts)) == 3
+    assert len(sleeps) == 2 and all(0 < s <= run_scenario.RATE_LIMIT_WAIT_S for s in sleeps)
+
+
+def test_no_wait_when_no_rate_limited_scenario_ran(stubbed_main):
+    _, outcomes, sleeps, _ = stubbed_main
+    outcomes["S1"] = S1_PASS
+    run_scenario.main(["S1", "--env", "local", "--runs", "2"])
+    assert sleeps == []
+
+
+def test_results_are_written_after_every_scenario(stubbed_main, monkeypatch):
+    """An interrupt part-way keeps what already ran."""
+    calls, outcomes, _, tmp_path = stubbed_main
+    outcomes["S1"] = S1_PASS
+
+    def interrupt_on_s2(scenario, env, personas, run_salt):
+        if scenario.id == "S2":
+            raise KeyboardInterrupt
+        return outcomes["S1"]
+    monkeypatch.setattr(run_scenario, "run_one", interrupt_on_s2)
+    with pytest.raises(KeyboardInterrupt):
+        run_scenario.main(["S1", "S2", "--env", "local"])
+    files = list((tmp_path / "results").glob("scenarios-*.json"))
+    saved = json.loads(files[0].read_text())["results"]
+    assert len(files) == 1 and [r["scenario"] for r in saved] == ["S1"] and saved[0]["verdict"] == "pass"

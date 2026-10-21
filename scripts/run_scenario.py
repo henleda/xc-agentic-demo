@@ -13,10 +13,19 @@ How each scenario is driven (the same paths the presenter's cockpit uses):
     S6 (partner:<client>)        this script plays the partner: the plan runs here, through partner-lb
 
 S4 and S6 run last (rate-limit windows). With --runs N, the runner waits until 65 s after the last S4/S6 call before
-the next run (scenarios/README.md, "Repeatability"). A scenario with no expectations for this environment is
-reported as "no expectations", never as a pass. Exit code: 0 if every scenario with expectations passed, else 1.
+the next run, and each run logs in with a fresh RUN_SALT (scenarios/README.md, "Repeatability").
 
-Results: results/scenarios-<UTC timestamp>.json (gitignored), one entry per scenario per run, with the trace.
+Verdicts:
+    PASS   every check of expect.<env> holds, the agent ran the scenario that was asked for, and the scripted steps
+           match the plan in scenarios/ (so a stale image cannot pass an edited plan)
+    FAIL   it ran, and a check did not hold; each failing check is printed with what the step really got and why
+    ERROR  it could not run properly: login failed, a hop was unreachable, the job exited non-zero, the agent ran a
+           different plan. Never counted as a pass, whatever the partial trace shows
+    --     no expectations for this environment (S7 locally): reported, never counted as a pass
+Exit code: 0 only if at least one scenario was checked and every checked scenario passed; else 1.
+
+Results: results/scenarios-<UTC timestamp>.json (gitignored), written after every scenario, so an interrupted run
+keeps what it had. On the devbox, pull them with `make devbox-results`.
 """
 
 from __future__ import annotations
@@ -25,6 +34,7 @@ import argparse
 import asyncio
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -46,28 +56,40 @@ import demo_env  # noqa: E402
 ROOT = demo_env.ROOT
 LAST = ("S4", "S6")  # rate-limited scenarios run last
 RATE_LIMIT_WAIT_S = 65
-CHAT_TIMEOUT_S = 600  # a whole agent turn; the front door waits about as long (docs/08 R41)
+CHAT_TIMEOUT_S = 660  # longer than the front door's 600 s, so its 504 (with a body) arrives first (docs/08 R41)
+JOB_TIMEOUT_S = 300
 TRACE_PREFIX = "TRACE "
 
 
 # ---- driving one scenario ------------------------------------------------------------------------------------------
 
 
-def run_one(scenario: Scenario, env: demo_env.DemoEnv, personas: Personas) -> dict:
-    """{trace, estate_delta, reply, error}: what happened. Never raises for HTTP problems; those are in the trace."""
-    if scenario.persona.startswith("job:"):
-        return run_job(scenario, env)
-    if scenario.persona.startswith("partner:"):
-        return asyncio.run(run_partner(scenario, env))
-    return run_chat(scenario, env, personas)
+def run_one(scenario: Scenario, env: demo_env.DemoEnv, personas: Personas, run_salt: str) -> dict:
+    """{trace, estate_delta, reply, matched, error}: what happened. Never raises: a hop that is down, a timeout, a
+    body that is not JSON or a hung job becomes this scenario's error, and the run goes on to the next scenario."""
+    try:
+        if scenario.persona.startswith("job:"):
+            return run_job(scenario, env)
+        if scenario.persona.startswith("partner:"):
+            return asyncio.run(run_partner(scenario, env))
+        return run_chat(scenario, env, personas, run_salt)
+    except subprocess.TimeoutExpired:
+        return {"trace": [], "error": f"the job did not finish within {JOB_TIMEOUT_S} s"}
+    except httpx.TimeoutException as e:
+        return {"trace": [], "error": f"timed out: {type(e).__name__} (is an agent turn stuck?)"}
+    except httpx.HTTPError as e:
+        return {"trace": [], "error": f"unreachable: {type(e).__name__}: {e} (is the stack up? make local-up)"}
+    except Exception as e:  # bad JSON, a missing key, an OS error: still this scenario's error, not the run's
+        return {"trace": [], "error": f"{type(e).__name__}: {e}"}
 
 
-def run_chat(scenario: Scenario, env: demo_env.DemoEnv, personas: Personas) -> dict:
+def run_chat(scenario: Scenario, env: demo_env.DemoEnv, personas: Personas, run_salt: str) -> dict:
     persona = personas.get(scenario.persona)
+    if persona is None:
+        return {"trace": [], "error": f"persona {scenario.persona!r} is not in config/personas.yaml"}
     door = env.front_doors[env.front_door_for(persona["role"])]
     with httpx.Client(timeout=CHAT_TIMEOUT_S) as client:
-        login = client.post(f"{door}/auth/demo-login", json={"sub": scenario.persona,
-                                                             "run_salt": os.environ.get("RUN_SALT", "")})
+        login = client.post(f"{door}/auth/demo-login", json={"sub": scenario.persona, "run_salt": run_salt})
         if login.status_code != 200:
             return {"trace": [], "error": f"login as {scenario.persona} failed: HTTP {login.status_code}"}
         auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -77,23 +99,25 @@ def run_chat(scenario: Scenario, env: demo_env.DemoEnv, personas: Personas) -> d
         if scenario.repeat_message:  # S7: the cockpit sends the message N times; record each front-door answer
             trace = []
             for attempt in range(1, scenario.repeat_message + 1):
+                started = time.monotonic()
                 response = client.post(url, json=body, headers=auth)
-                trace.append(front_door_row(attempt, response))
+                trace.append(front_door_row(attempt, response, started))
             return {"trace": trace, "estate_delta": delta(before, estate(client, env)), "reply": None}
+        started = time.monotonic()
         response = client.post(url, json=body, headers=auth)
         after = estate(client, env)
     if response.status_code != 200:
-        return {"trace": [front_door_row(1, response)], "estate_delta": delta(before, after),
+        return {"trace": [front_door_row(1, response, started)], "estate_delta": delta(before, after),
                 "error": f"chat answered HTTP {response.status_code}"}
     payload = response.json()
     return {"trace": payload["trace"], "estate_delta": delta(before, after), "reply": payload.get("reply"),
             "matched": payload.get("scenario")}
 
 
-def front_door_row(attempt: int, response: httpx.Response) -> dict:
-    """One S7-style row: what the front door answered to one chat attempt."""
+def front_door_row(attempt: int, response: httpx.Response, started: float) -> dict:
+    """One S7-style row: what the front door answered to one chat attempt (started = time.monotonic() before it)."""
     result = HttpResult(status=response.status_code, headers={k.lower(): v for k, v in response.headers.items()},
-                        body_text=response.text, json=None, latency_ms=int(response.elapsed.total_seconds() * 1000))
+                        body_text=response.text, json=None, latency_ms=int((time.monotonic() - started) * 1000))
     blocked_by, reason = classify(result, via_lb=True)
     return {"kind": "front_door", "attempt": attempt, "status": response.status_code, "blocked_by": blocked_by,
             "reason": reason}
@@ -106,7 +130,7 @@ def run_job(scenario: Scenario, env: demo_env.DemoEnv) -> dict:
     with httpx.Client(timeout=10) as client:
         before = estate(client, env)
         done = subprocess.run([str(ROOT / "deploy/local/compose.sh"), "run", "--rm", "-T", job],
-                              capture_output=True, text=True, timeout=300)
+                              capture_output=True, text=True, timeout=JOB_TIMEOUT_S)
         after = estate(client, env)
     trace = [json.loads(line[len(TRACE_PREFIX):]) for line in done.stdout.splitlines() if line.startswith(TRACE_PREFIX)]
     error = None if done.returncode == 0 else f"job exited {done.returncode}: {done.stderr.strip()[-500:]}"
@@ -130,44 +154,76 @@ async def run_partner(scenario: Scenario, env: demo_env.DemoEnv) -> dict:
     return {"trace": [step.to_dict() for step in run.steps]}
 
 
+ESTATE_KEYS = ("refunds_issued", "stock_writes")
+
+
 def estate(client: httpx.Client, env: demo_env.DemoEnv) -> dict | None:
-    """ERP write counters, or None where the admin port is not reachable (tenant, or ERP down)."""
+    """ERP write counters, or None when they cannot be read (tenant, ERP down, an unexpected answer). None makes an
+    estate_delta expectation fail with "estate not observed", never pass by accident."""
     if not env.erp_admin_url:
         return None
     try:
-        return client.get(f"{env.erp_admin_url}/admin/state", timeout=5).json()
+        response = client.get(f"{env.erp_admin_url}/admin/state", timeout=5)
+        state = response.json()
     except (httpx.HTTPError, ValueError):
         return None
+    if response.status_code != 200 or not isinstance(state, dict) or not all(
+            isinstance(state.get(key), int) for key in ESTATE_KEYS):
+        return None
+    return state
 
 
 def delta(before: dict | None, after: dict | None) -> dict | None:
     if before is None or after is None:
         return None
-    return {key: after[key] - before[key] for key in ("refunds_issued", "stock_writes")}
+    return {key: after[key] - before[key] for key in ESTATE_KEYS}
 
 
 # ---- checking and reporting ----------------------------------------------------------------------------------------
 
 
-def check(scenario: Scenario, env_name: str, outcome: dict) -> dict:
+def check(scenario: Scenario, env_name: str, outcome: dict, plan_env: dict | None = None) -> dict:
     block = select_block(scenario.expect, env_name)
     result = evaluate(block, outcome.get("trace", []), estate_delta=outcome.get("estate_delta"))
+    error = outcome.get("error") or wrong_run(scenario, outcome, plan_env)
     if result.skipped:
         verdict = "no expectations"
-    elif outcome.get("error") and not outcome.get("trace"):
-        verdict = "error"
+    elif error:
+        verdict = "error"  # whatever a partial trace shows: a crashed job or a different plan is never a pass
     else:
         verdict = "pass" if result.ok else "fail"
     return {
         "scenario": scenario.id,
         "title": scenario.title,
         "verdict": verdict,
-        "error": outcome.get("error"),
+        "error": error,
         "checks": [{"ok": c.ok, "description": c.description, "detail": c.detail} for c in result.checks],
         "estate_delta": outcome.get("estate_delta"),
         "reply": outcome.get("reply"),
         "trace": outcome.get("trace", []),
     }
+
+
+def wrong_run(scenario: Scenario, outcome: dict, plan_env: dict | None) -> str | None:
+    """Why this trace is not a run of this scenario, or None. Catches an agent that matched a different scenario (or
+    none) and a container that runs a different plan than scenarios/ says (a stale image after an edit)."""
+    if "matched" in outcome and outcome["matched"] != scenario.id:
+        return (f"the agent ran {outcome['matched'] or 'its normal loop (no scenario)'}, not {scenario.id}: "
+                "check the persona, the message and the trigger")
+    if plan_env is None or not scenario.plan:
+        return None
+    # Compared per step: plan index, kind, and for tool steps the tool name. (Argument values are not compared: the
+    # trace keeps only a 300-character preview of them.)
+    try:
+        planned = [(step.i, step.kind, step.spec.get("tool")) for step in expand_plan(scenario.plan, plan_env)]
+    except PlanError:
+        return None  # --dry reports plan problems; here the trace speaks for itself
+    ran = [(step["i"], step["kind"], step.get("tool")) for step in outcome.get("trace", [])
+           if step.get("scripted") and step.get("i") is not None]
+    if ran and ran != planned[:len(ran)]:
+        return (f"the trace does not follow scenarios/{scenario.source or scenario.id}: the container runs another "
+                "version of the plan (rebuild: make local-up)")
+    return None
 
 
 def ordered(scenarios: list[Scenario], wanted: list[str] | None) -> list[Scenario]:
@@ -182,10 +238,11 @@ def dry_run(scenarios: list[Scenario], env: demo_env.DemoEnv) -> int:
     """Expand every plan with this environment's variables; report problems; send nothing."""
     failures = 0
     for scenario in scenarios:
-        plan_env = {**os.environ, **env.plan_env}
-        if scenario.persona.startswith("job:") and env.name == "local":
-            # Locally the job's env comes from compose (EXFIL_TEST_URL is set on the service), not from this shell.
-            plan_env.setdefault("EXFIL_TEST_URL", "https://exfil.invalid/rows")
+        if scenario.persona.startswith("job:"):
+            # The job's plan runs inside its own container: check it against that container's env, not this shell's.
+            plan_env = demo_env.job_env(env)
+        else:
+            plan_env = {**os.environ, **env.plan_env}
         try:
             steps = expand_plan(scenario.plan, plan_env)
             print(f"  ok    {scenario.id:4} {len(steps):3} steps  {scenario.title}")
@@ -203,6 +260,13 @@ def print_result(result: dict) -> None:
     for c in result["checks"]:
         if not c["ok"]:
             print(f"        x {c['description']}: {c['detail']}")
+    if result["verdict"] in ("fail", "error"):
+        # The steps behind the verdict: what each one really got and why (e.g. a refused token before a null status).
+        for step in result["trace"]:
+            if step.get("kind") == "front_door" or step.get("status") != 200 or step.get("blocked_by"):
+                where = f"i={step['i']}" if step.get("i") is not None else f"n={step.get('n', step.get('attempt'))}"
+                print(f"          {where:6} {step.get('kind', ''):10} {step.get('status')!s:5} "
+                      f"{step.get('blocked_by') or '':8} {step.get('reason') or ''}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -215,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.all == bool(args.ids):
         parser.error("give scenario ids or --all, not both")
+    if args.runs < 1:
+        parser.error("--runs must be at least 1")
+    sys.stdout.reconfigure(line_buffering=True)  # over `make devbox-run` (no tty) each line shows as it happens
 
     env = demo_env.for_name(args.env)
     scenarios = ordered(load_scenarios(ROOT / "scenarios"), None if args.all else args.ids)
@@ -226,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     personas = Personas.load(ROOT / "config/personas.yaml")
+    out = ROOT / "results" / f"scenarios-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
     results, last_limited_call = [], None
     for run in range(1, args.runs + 1):
         if run > 1 and last_limited_call is not None:
@@ -233,22 +301,33 @@ def main(argv: list[str] | None = None) -> int:
             if wait > 0:
                 print(f"waiting {wait:.0f} s for rate-limit windows to clear ...")
                 time.sleep(wait)
-        print(f"run {run}/{args.runs}, env {env.name}:")
+        # A fresh salt per run (Mallory logs in as mallory.x-<salt>), so malicious-user state in XC never carries
+        # over between runs. RUN_SALT from the shell is used for run 1 only.
+        run_salt = (os.environ.get("RUN_SALT") if run == 1 else None) or secrets.token_hex(4)
+        print(f"run {run}/{args.runs}, env {env.name}, run salt {run_salt}:")
         for scenario in scenarios:
-            result = check(scenario, env.name, run_one(scenario, env, personas))
-            result["run"] = run
+            print(f"  ..    {scenario.id:4} running", end="\r")
+            outcome = run_one(scenario, env, personas, run_salt)
+            result = check(scenario, env.name, outcome, {**os.environ, **env.plan_env})
+            result.update(run=run, run_salt=run_salt)
             results.append(result)
             print_result(result)
+            write_results(out, env.name, args.runs, results)  # after every scenario: an interrupt keeps the rest
             if scenario.id in LAST:
                 last_limited_call = time.monotonic()
 
-    out = ROOT / "results" / f"scenarios-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
-    out.write_text(json.dumps({"env": env.name, "runs": args.runs, "results": results}, indent=1, default=str))
     counted = [r for r in results if r["verdict"] != "no expectations"]
     passed = sum(r["verdict"] == "pass" for r in counted)
     print(f"{passed}/{len(counted)} passed ({len(results) - len(counted)} with no expectations) -> "
           f"{out.relative_to(ROOT)}")
-    return 0 if passed == len(counted) else 1
+    return 0 if counted and passed == len(counted) else 1
+
+
+def write_results(path: Path, env_name: str, runs: int, results: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps({"env": env_name, "runs": runs, "results": results}, indent=1, default=str))
+    temp.replace(path)
 
 
 if __name__ == "__main__":

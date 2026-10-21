@@ -24,6 +24,7 @@ from copperline_common.jwt import public_jwks, sign
 from copperline_common.outbound import new_http_client
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from erp_mock.app import create_admin_app as create_erp_admin_app
 from erp_mock.app import create_business_app
 from erp_mock.db import Db
 from erp_mock.settings import Settings as ErpSettings
@@ -175,6 +176,7 @@ class Stack:
     http: httpx.AsyncClient  # a client "inside the compose network": it resolves every LB and pool hostname
     db: Db
     usage: Usage  # ai-gw's token usage (what GET /v1/usage on the admin port returns)
+    mesh: "Mesh"  # hostname -> app; tests may swap one out to break a hop
 
 
 @pytest.fixture
@@ -191,6 +193,7 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
     erp_settings = ErpSettings(db_path=tmp_path / "erp.sqlite3", issuer=ISSUER, jwks_path=str(jwks_path))
     db = Db(erp_settings.db_path, erp_settings.seed_path)
     mesh.apps["erp-mock"] = create_business_app(erp_settings, db)
+    mesh.apps["erp-mock-admin"] = create_erp_admin_app(erp_settings, db)
     mesh.apps["idp"] = create_idp_app(IdpSettings(config_dir=config_dir, issuer=ISSUER, signing_key_pem=pem,
                                                   client_secrets=dict(SECRETS)))
     for server in ("catalog", "orders", "inventory", "refunds"):
@@ -213,5 +216,5 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
     for host, lb_name in LB_HOSTS.items():
         mesh.apps[host] = gateway(lb_name, jwks_path, http)
 
-    yield Stack(http=http, db=db, usage=usage)
+    yield Stack(http=http, db=db, usage=usage, mesh=mesh)
     db.close()

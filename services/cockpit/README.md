@@ -16,3 +16,7 @@ The cockpit is a single-page app (plain HTML + htmx or a small React build; keep
 ## Visual language (match the deck)
 
 Allowed steps are green, `blocked_by: xc` is F5 red (#E4002B), `server` and `network` are amber. Every row shows the status code and latency.
+
+## Shared with `scripts/run_scenario.py` (decide in step 10)
+
+The runner drives scenarios locally exactly the way this backend will on stage: log in at the front door with the run's `RUN_SALT`, POST `/…/v1/chat` with `scenario_hint`, read ERP `estate_delta` on loopback around the turn, send S7's message `repeat_message` times (one `front_door` row per attempt), run S5 as a Job and tail its `TRACE ` lines, play S6 with `plan_executor`. In the tenant only this backend can do all of that (the ERP admin port is on copperline-core's loopback), so `run_scenario.py --env tenant` (Phase 2) will call a backend endpoint rather than repeat the logic. Step 10 should move the driving code into one shared module both use, so the stage and the acceptance check can never drift apart.

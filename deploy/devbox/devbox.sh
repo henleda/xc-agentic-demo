@@ -7,6 +7,7 @@
 #   deploy/devbox/devbox.sh run CMD   sync, then run CMD in the repo on the box
 #   deploy/devbox/devbox.sh ssh       interactive shell on the box
 #   deploy/devbox/devbox.sh tunnel    forward the cockpit and front doors to localhost (Ctrl-C to stop)
+#   deploy/devbox/devbox.sh results   copy results/*.json (scenario runs) from the box to the laptop
 #   deploy/devbox/devbox.sh destroy   delete the box and its IAM role
 #
 # Needs: terraform, the AWS CLI with session-manager-plugin, and AWS SSO credentials
@@ -69,7 +70,7 @@ cmd_sync() {
   # sync from the laptop, so they are excluded: rsync then neither copies nor deletes them.
   rsync -az --delete \
     --exclude .git/ --exclude .venv/ --exclude __pycache__/ --exclude .pytest_cache/ --exclude .ruff_cache/ \
-    --exclude /.secrets/ --exclude /deploy/xc/generated/ --exclude /deploy/local/.run/ \
+    --exclude /.secrets/ --exclude /deploy/xc/generated/ --exclude /deploy/local/.run/ --exclude '/results/*.json' \
     --exclude 'deploy/devbox/.terraform/' --exclude 'deploy/devbox/*.tfstate*' \
     --exclude 'deploy/devbox/.ssh_config' --exclude 'deploy/devbox/.known_hosts' \
     -e "ssh -F $SSH_CONFIG" "$ROOT/" "copperline-devbox:$REMOTE_DIR/"
@@ -78,6 +79,14 @@ cmd_sync() {
 cmd_run() {
   cmd_sync
   ssh_box "cd $REMOTE_DIR && export PATH=\$HOME/.local/bin:\$PATH && $*"
+}
+
+cmd_results() {
+  [ -f "$SSH_CONFIG" ] || write_ssh_config
+  mkdir -p "$ROOT/results"
+  rsync -az -e "ssh -F $SSH_CONFIG" "copperline-devbox:$REMOTE_DIR/results/" --include '*.json' --exclude '*' \
+    "$ROOT/results/"
+  ls -1t "$ROOT"/results/*.json 2>/dev/null | head -5
 }
 
 cmd_tunnel() {
@@ -100,6 +109,7 @@ case "${1:-}" in
   run) shift; cmd_run "$@" ;;
   ssh) [ -f "$SSH_CONFIG" ] || write_ssh_config; ssh_box ;;
   tunnel) cmd_tunnel ;;
+  results) cmd_results ;;
   destroy) cmd_destroy ;;
-  *) sed -n '2,13p' "$0"; exit 2 ;;
+  *) sed -n '2,14p' "$0"; exit 2 ;;
 esac
