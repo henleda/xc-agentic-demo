@@ -8,8 +8,8 @@
 | `render_manifests.py` | to build (Phase 2) | Substitute `${REGISTRY}`, `${IMAGE_TAG}` and `${EXFIL_TEST_URL}` (S5 exits 2 without it) from `.env`, render the `agent-configs` ConfigMap from `config/`, write `deploy/vk8s/rendered/`. Fail on any `${...}` left unrendered |
 | `build_images.sh` | to build (Phase 2) | Build multi-arch images, run each with `--user 1000770000:0` as a smoke check, push |
 | `check_bedrock.py` | to build | Run on EC2: one Converse call per route through the VPC endpoint |
-| `smoke_test.py` | to build | `--env local\|tenant [--no-security]`: health checks via LBs, one login, one tool call, one model call, ERP not resolvable from RE (via debug Job) |
-| `run_scenario.py` | to build | `--all \| S1 S3 ... --env local\|tenant [--dry] [--discovery-seed]`: runs scenarios through the cockpit backend API or directly, asserts `expect`, writes `results/scenarios-<ts>.json` |
+| `smoke_test.py` | **working** (`--env local`); tenant in Phase 2 | Go/no-go for every hop: every LB answers, admin ports on loopback, one login, one chat whose token exchange, tool call and model call all succeed, ERP admin not reachable through erp-lb. `make local-smoke`. Tenant (Phase 2): the same through the public front doors, plus ERP not resolvable from an RE pod and `--no-security` |
+| `run_scenario.py` | **working** (`--env local`); tenant in Phase 2 | `--all \| S1 S3a ... --env local [--runs N] [--dry]`: runs each scenario the way the stage does it (agent chats through the front doors with `scenario_hint`, S5 as the compose job, S6 played by this script through partner-lb), checks `expect.<env>`, writes `results/scenarios-<ts>.json`. S4 and S6 run last; between runs it waits 65 s after the last S4/S6 call. "No expectations" never counts as a pass. `make local-scenarios` (add `RUNS=3` for the definition-of-done check). `--dry` expands every plan and sends nothing. Tenant runs and `--discovery-seed` come with the cockpit (Phase 2) |
 | `measure_latency.py` | to build (Phase 4) | Measures RE→CE vs RE-local tool calls per RE and the 30-call loop overhead → `results/latency.json` |
 | `reset_demo.sh` | to build | ERP reset, gateway usage reset, new `RUN_SALT`, wait for rate-limit windows; under 60 s |
 | `preflight.sh` | to build | Reset + smoke + `run_scenario --all --dry` + print the go/no-go table |
@@ -68,3 +68,17 @@ It fills the `{{ NAME }}` placeholders in `deploy/vk8s/secrets/*.template.yaml` 
   - Each rendered file is re-parsed with PyYAML before anything is written, and every value must come back out unchanged.
 - **Output.** One `<name>.yaml` per template in `deploy/vk8s/secrets/rendered/` (mode 0700), each file 0600. Files rendered from a template that has since been removed are not deleted.
 - **Phase 1.** Nothing in this phase applies the output. `make deploy-vk8s` uses it in Phase 2.
+
+## `run_scenario.py` and `smoke_test.py`
+
+Both read endpoints from `scripts/demo_env.py`: locally the published 127.0.0.1 ports of the compose stack (front doors 8001–8003, internal LBs 8011–8014, admin 8181/8190). S6's client secret comes from `GRANITE_SUPPLY_SECRET` in the shell, else `.secrets/secrets.env`; nothing is printed.
+
+```bash
+make local-up                         # on the devbox: make devbox-run CMD="make local-up"
+make local-smoke                      # every hop, a few seconds
+make local-scenarios                  # every scenario once
+RUNS=3 make local-scenarios           # the definition-of-done check (about 4 minutes with the 65 s waits)
+uv run python scripts/run_scenario.py S1 S3a --env local
+```
+
+A scenario's verdict is `PASS`, `FAIL` (each failing check is printed), `ERROR` (it could not run at all: login failed, job exited non-zero) or `--` (no expectations for this environment, e.g. S7 locally). The exit code is 0 only if every scenario with expectations passed. The results file holds every check and the full trace.

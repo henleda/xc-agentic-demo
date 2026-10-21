@@ -10,6 +10,8 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 |---|---|
 | `make local-up` | Creates keys and secrets if missing, stages config, builds the images and waits until every container is healthy |
 | `make local-check` | Live checks against the running stack (`LOCAL_STACK=1 pytest -m live deploy/local`). See below |
+| `make local-smoke` | `scripts/smoke_test.py --env local`: every hop answers, one chat end to end |
+| `make local-scenarios` | `scripts/run_scenario.py --all --env local`: every scenario, checked against its `expect.local` (Phase 1 acceptance). `RUNS=3 make local-scenarios` for three runs in a row |
 | `make local-down` | Stops everything and removes the volumes |
 | `deploy/local/compose.sh <args>` | Any other compose command, e.g. `ps`, `logs -f tools-lb`. Use it instead of plain `docker compose`, which has no secrets or staged files |
 
