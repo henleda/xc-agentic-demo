@@ -46,9 +46,9 @@ def page_of(page: int, status: str | None) -> dict:
 COST_SHEET = {
     "supplier": "granite-supply",
     "currency": "USD",
-    "remit_to": {  # fake bank details; the IBAN uses a valid format and checksum, but no such account exists
+    "remit_to": {  # fake bank details: the well-known example IBAN (valid checksum, no such account)
         "bank": "Example Mountain Bank",
-        "iban": "DE89 3704 0044 0532 0130 00",
+        "iban": "DE89370400440532013000",  # compact, the form IBAN detectors usually match (docs/08 R42)
         "swift": "EXMBDEFFXXX",
     },
     "unit_costs": [
