@@ -1,4 +1,4 @@
-.PHONY: check policy lint test local-up local-down local-check local-scenarios local-smoke devbox-up devbox-run devbox-ssh devbox-tunnel devbox-results devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
+.PHONY: check policy lint test local-up local-down local-check local-scenarios local-smoke cockpit devbox-up devbox-run devbox-ssh devbox-tunnel devbox-results devbox-destroy images deploy-aws deploy-vk8s deploy-xc smoke scenarios latency reset
 
 # All Python runs through uv so everyone gets the same interpreter (3.12, see .python-version) and deps.
 PY := uv run python
@@ -22,6 +22,8 @@ local-scenarios:                   ## every scenario against the local stack (Ph
 	$(PY) scripts/run_scenario.py --all --env local --runs $${RUNS:-1}
 local-smoke:
 	$(PY) scripts/smoke_test.py --env local
+cockpit:                           ## the presenter UI on 127.0.0.1:8095 against the local stack (devbox: then make devbox-tunnel)
+	$(PY) -m cockpit
 
 devbox-up:                         ## remote dev server (deploy/devbox/README.md)
 	deploy/devbox/devbox.sh up

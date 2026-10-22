@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copperline cockpit</title>
+<style>
+  /* One high-contrast light theme for the projector. Colours follow the deck: allowed green, XC block F5 red,
+     server/network amber (services/cockpit/README.md). No external fonts or scripts: the page works offline. */
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1b1f24; --muted: #5b6470; --line: #d9dee5;
+    --ok: #1a7f37; --ok-bg: #e7f5ec; --xc: #e4002b; --xc-bg: #fde8ec; --warn: #9a6700; --warn-bg: #fff4d6;
+    --accent: #0b5cad;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--panel);
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  .scenarios { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; background: var(--panel);
+               border-bottom: 1px solid var(--line); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+           border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.scenario b { color: var(--accent); margin-right: 4px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { display: grid; grid-template-columns: 300px 1fr 300px; gap: 12px; padding: 12px 16px;
+         height: calc(100vh - 118px); }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+            overflow: auto; min-height: 0; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+               margin: 0 0 8px; }
+  select, textarea { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
+  textarea { height: 70px; resize: vertical; }
+  .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; }
+  .msg.user { background: #eef3fb; }
+  .msg.agent { background: #f2f2f2; }
+  .msg.error { background: var(--warn-bg); color: var(--warn); }
+  .verdict { display: inline-block; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+  .verdict.pass { background: var(--ok-bg); color: var(--ok); }
+  .verdict.fail, .verdict.error { background: var(--xc-bg); color: var(--xc); }
+  .verdict.none { background: #eee; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.ok td.status { color: var(--ok); }
+  tr.xc { background: var(--xc-bg); }
+  tr.xc td.status, tr.xc td.by { color: var(--xc); font-weight: 700; }
+  tr.amber { background: var(--warn-bg); }
+  tr.amber td.status, tr.amber td.by { color: var(--warn); font-weight: 700; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.detail { color: var(--muted); font-size: 13px; max-width: 420px; overflow-wrap: anywhere; }
+  .stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .stat b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .small { color: var(--muted); font-size: 12px; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line);
+          border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; height: auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Copperline cockpit</h1>
+  <span class="meta" id="meta">loading…</span>
+  <span class="spacer"></span>
+  <button id="reset" title="ERP back to seed, AI gateway usage to zero, new run salt">Reset demo</button>
+</header>
+<div class="scenarios" id="scenarios"></div>
+<main>
+  <section>
+    <h2>Persona and chat</h2>
+    <select id="persona"></select>
+    <div id="chat"></div>
+    <textarea id="input" placeholder="Rehearsal only. On stage, use the scenario buttons."></textarea>
+    <button class="primary" id="send" style="margin-top:6px">Send</button>
+  </section>
+  <section>
+    <h2>Trace <span id="verdict"></span></h2>
+    <div id="title" class="small"></div>
+    <table>
+      <thead><tr><th>#</th><th>i</th><th>step</th><th>status</th><th>blocked by</th><th>ms</th><th>detail</th></tr></thead>
+      <tbody id="trace"><tr><td colspan="7" class="small">Pick a scenario.</td></tr></tbody>
+    </table>
+    <div id="checks" class="small" style="margin-top:8px"></div>
+  </section>
+  <section>
+    <h2>Estate</h2>
+    <div class="stat"><span>Refunds issued</span><b id="refunds">–</b></div>
+    <div class="stat"><span>Stock writes</span><b id="stock">–</b></div>
+    <h2 style="margin-top:14px">AI gateway tokens</h2>
+    <div id="usage" class="small">–</div>
+    <h2 style="margin-top:14px">Last ERP writes</h2>
+    <div id="writes" class="small">–</div>
+  </section>
+</main>
+<script>
+"use strict";
+// Plain DOM code: no framework, no build step. Text from the server is always inserted with textContent.
+const $ = (id) => document.getElementById(id);
+let state = null;
+let busy = false;
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else if (k === "onclick") node.onclick = v; else node.setAttribute(k, v);
+  }
+  for (const c of children) node.append(c === null || c === undefined ? "" : c);
+  return node;
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
+  return response.json();
+}
+
+function rowClass(step) {
+  if (step.blocked_by === "xc") return "xc";
+  if (step.blocked_by || step.status === null || (step.status >= 400) || step.is_error) return "amber";
+  return "ok";
+}
+
+function stepLabel(step) {
+  if (step.kind === "front_door") return `front door #${step.attempt}`;
+  if (step.kind === "tool") return step.tool + (step.mcp_name_header ? ` (header: ${step.mcp_name_header})` : "");
+  if (step.kind === "token") return `token ${step.identity ? "→ " + (step.identity.aud || "") : ""}`;
+  return step.kind;
+}
+
+function stepDetail(step) {
+  if (step.reason) return step.reason;
+  if (step.is_error) return "tool error: " + (step.result_preview || "");
+  if (step.identity) {  // who the token is for: the agent and the human it acts for (the S3 point)
+    const id = step.identity;
+    if (!id.agent_id) return `${id.sub || ""} (${id.aud || ""})`;
+    return `${id.agent_id} (${id.agent_role}) for ${id.obo_sub} (${id.obo_role})`;
+  }
+  return (step.result_preview || "").slice(0, 160);
+}
+
+function showTrace(result) {
+  const body = $("trace");
+  body.replaceChildren();
+  const trace = result.trace || [];
+  if (!trace.length) body.append(el("tr", {}, el("td", { colspan: 7, class: "small" }, result.error || "No steps.")));
+  trace.forEach((step, index) => {
+    body.append(el("tr", { class: rowClass(step) },
+      el("td", { class: "num" }, String(step.n ?? index + 1)),
+      el("td", { class: "num" }, step.i === null || step.i === undefined ? "" : String(step.i)),
+      el("td", {}, stepLabel(step)),
+      el("td", { class: "num status" }, step.status === null ? "none" : String(step.status)),
+      el("td", { class: "by" }, step.blocked_by || ""),
+      el("td", { class: "num" }, String(step.latency_ms ?? "")),
+      el("td", { class: "detail" }, stepDetail(step))));
+  });
+  const verdict = result.verdict;
+  $("verdict").replaceChildren(verdict ? el("span", { class: "verdict " + (verdict === "no expectations" ? "none" : verdict) },
+    verdict === "no expectations" ? "no local expectations" : verdict.toUpperCase()) : "");
+  const failed = (result.checks || []).filter((c) => !c.ok);
+  $("checks").replaceChildren(...(result.error ? [el("div", {}, result.error)] : []),
+    ...failed.map((c) => el("div", {}, `✗ ${c.description}: ${c.detail}`)));
+}
+
+function shortTitle(title) {
+  // "On-behalf-of: right agent, wrong human (a) then right human (b)" -> "On-behalf-of"; full title is the tooltip.
+  return title.split(/[:(]/)[0].trim();
+}
+
+function addMessage(kind, text) {
+  $("chat").append(el("div", { class: "msg " + kind }, text));
+  $("chat").lastChild.scrollIntoView({ block: "nearest" });
+}
+
+function setBusy(on, label) {
+  busy = on;
+  document.querySelectorAll("button").forEach((b) => (b.disabled = on));
+  if (on) $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7 }, el("span", { class: "spin" }), " " + label)));
+}
+
+async function runScenario(scenario) {
+  if (busy) return;
+  const persona = state.personas.find((p) => p.sub === scenario.persona);
+  if (persona) $("persona").value = persona.sub;
+  $("title").textContent = `${scenario.id}: ${scenario.title}`;
+  addMessage("user", `${scenario.persona}: ${scenario.message}` +
+    (scenario.repeat_message ? `  (×${scenario.repeat_message})` : ""));
+  setBusy(true, `running ${scenario.id}…`);
+  try {
+    const result = await api(`/api/scenarios/${encodeURIComponent(scenario.id)}/run`, { method: "POST" });
+    showTrace(result);
+    if (result.reply) addMessage("agent", result.reply);
+    else if (result.error) addMessage("error", result.error);
+  } catch (e) {
+    showTrace({ trace: [], error: "cockpit backend unreachable: " + e });
+  } finally {
+    setBusy(false);
+    refreshEstate();
+  }
+}
+
+async function sendChat() {
+  const text = $("input").value.trim();
+  if (!text || busy) return;
+  const sub = $("persona").value;
+  addMessage("user", `${sub}: ${text}`);
+  $("input").value = "";
+  $("title").textContent = `free chat as ${sub} (not a scenario)`;
+  setBusy(true, "waiting for the agent…");
+  try {
+    const result = await api("/api/chat", { method: "POST",
+      body: JSON.stringify({ sub, messages: [{ role: "user", content: text }] }) });
+    showTrace(result);
+    addMessage(result.reply ? "agent" : "error", result.reply || result.error || "no reply");
+  } finally {
+    setBusy(false);
+    refreshEstate();
+  }
+}
+
+async function refreshEstate() {
+  try {
+    const estate = await api("/api/estate");
+    const erp = estate.erp;
+    $("refunds").textContent = erp ? erp.refunds_issued : "–";
+    $("stock").textContent = erp ? erp.stock_writes : "–";
+    $("writes").replaceChildren(...(erp ? erp.last_writes.slice(0, 6).map((w) =>
+      el("div", {}, `${w.ts.slice(11, 19)} ${w.kind} ${w.detail.order_id || w.detail.store_id || ""}`)) : ["–"]));
+    const usage = estate.ai_gateway;
+    $("usage").replaceChildren(...(usage ? [el("div", {}, `mode ${usage.mode}, ${usage.calls} calls`),
+      ...Object.entries(usage.by_agent).map(([agent, row]) => el("div", {}, `${agent}: ${row.total} tokens`))] : ["–"]));
+    $("meta").textContent = `env ${state ? state.env : "?"} · run salt ${estate.run_salt}`;
+  } catch (e) { /* the next poll will try again */ }
+}
+
+async function init() {
+  state = await api("/api/state");
+  $("persona").replaceChildren(...state.personas.map((p) =>
+    el("option", { value: p.sub }, `${p.name} (${p.role}) → ${p.agent} agent`)));
+  $("scenarios").replaceChildren(...state.scenarios.map((s) => {
+    // The persona makes look-alike variants (S3a / S3b) distinct on the button itself.
+    const who = s.persona.replace(/^partner:/, "").replace(/^job:/, "");
+    const button = el("button", { class: "scenario", title: `${s.title}\n\n${s.message}`, onclick: () => runScenario(s) },
+      el("b", {}, s.id), `${shortTitle(s.title)} `, el("span", { class: "small" }, `· ${who}`));
+    if (!s.console_link) return button;
+    return el("span", {}, button, " ", el("a", { href: s.console_link, target: "_blank", rel: "noopener" }, "XC"));
+  }));
+  $("send").onclick = sendChat;
+  $("reset").onclick = async () => {
+    if (busy) return;
+    setBusy(true, "resetting…");
+    try {
+      const r = await api("/api/reset", { method: "POST" });
+      $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7, class: "small" },
+        `Reset: ERP ${r.erp ? "ok" : "FAILED"}, AI gateway ${r.ai_gateway ? "ok" : "FAILED"}, new salt ${r.run_salt}`)));
+      $("verdict").replaceChildren();
+      $("checks").replaceChildren();
+    } finally { setBusy(false); refreshEstate(); }
+  };
+  refreshEstate();
+  setInterval(refreshEstate, 2000);
+  // ?run=S3a runs one scenario on load: a deep link for rehearsals (and for screenshots of a real trace).
+  const wanted = new URLSearchParams(location.search).get("run");
+  const scenario = wanted && state.scenarios.find((s) => s.id === wanted);
+  if (scenario) runScenario(scenario);
+}
+init();
+</script>
+</body>
+</html>

@@ -11,6 +11,7 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 | `make local-up` | Creates keys and secrets if missing, stages config, builds the images and waits until every container is healthy |
 | `make local-check` | Live checks against the running stack (`LOCAL_STACK=1 pytest -m live deploy/local`). See below |
 | `make local-smoke` | `scripts/smoke_test.py --env local`: every hop answers, one chat end to end |
+| `make cockpit` | The presenter UI on 127.0.0.1:8095 (on the devbox: then `make devbox-tunnel`) |
 | `make local-scenarios` | `scripts/run_scenario.py --all --env local`: every scenario, checked against its `expect.local` (Phase 1 acceptance). `RUNS=3 make local-scenarios` for three runs in a row |
 | `make local-down` | Stops everything and removes the volumes |
 | `deploy/local/compose.sh <args>` | Any other compose command, e.g. `ps`, `logs -f tools-lb`. Use it instead of plain `docker compose`, which has no secrets or staged files |
@@ -25,7 +26,7 @@ On this project, run it on the devbox: `make devbox-run CMD="make local-up"`, th
 | `shop-lb`, `ops-lb`, `partner-lb` | the public front doors | **8001**, **8002**, **8003** |
 | `tools-lb`, `llm-lb`, `idp-lb`, `erp-lb` | the internal LBs, on the network aliases `tools.agentic-demo`, `llm.agentic-demo`, `idp.agentic-demo` and `erp.agentic-demo`, port 80 | 8011, 8012, 8013, 8014 (debugging and tests only; nothing like them exists in XC) |
 
-Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The cockpit is added in step 10. `cockpit-lb` is not emulated locally: the cockpit will be published on 127.0.0.1 directly.
+Services call the internal LBs with exactly the vK8s URLs, `http://idp.agentic-demo` and so on, so no code or config changes between local and tenant. The cockpit (`make cockpit`, http://127.0.0.1:8095) runs on the host, not in compose: it starts S5 with `compose.sh run`, and `cockpit-lb` is not emulated locally. See `services/cockpit/README.md`.
 
 Every container runs the way vK8s will run it: `user: 1000770000:0`, read-only root filesystem, tmpfs `/tmp`, all capabilities dropped, not privileged, `no-new-privileges`. `make local-check` asserts each of these for all 18 containers. The internal-LB gateways listen on port 80 as non-root, through the per-container sysctl `net.ipv4.ip_unprivileged_port_start=0`. Every image that goes to vK8s listens on 8080.
 

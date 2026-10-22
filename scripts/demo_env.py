@@ -12,31 +12,18 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from copperline_common.demo_driver import CHAT_PATH, Endpoints  # noqa: F401  (CHAT_PATH re-exported for tests)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from envfile import read_env_file  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 SECRETS_FILE = ROOT / ".secrets" / "secrets.env"
-CHAT_PATH = {"shopper": "/v1/chat", "storeops": "/storeops/v1/chat", "refunds": "/refunds/v1/chat"}
 
 
-@dataclass
-class DemoEnv:
-    name: str
-    front_doors: dict[str, str]  # shop-lb / ops-lb / partner-lb -> base URL
-    tools_base_url: str | None = None  # internal LBs: only reachable directly in local mode
-    llm_base_url: str | None = None
-    idp_base_url: str | None = None
-    erp_lb_url: str | None = None  # erp-lb: CE-only in the tenant, so only reachable directly in local mode
-    erp_admin_url: str | None = None
-    aigw_admin_url: str | None = None
-    plan_env: dict[str, str] = field(default_factory=dict)  # ${VAR} values for plans run by this script
-
-    def front_door_for(self, role: str) -> str:
-        return "shop-lb" if role == "customer" else "ops-lb"
+DemoEnv = Endpoints  # the shared shape (copperline_common.demo_driver); this module only fills it in
 
 
 def local() -> DemoEnv:
@@ -53,6 +40,7 @@ def local() -> DemoEnv:
         aigw_admin_url="http://127.0.0.1:8190",
         # S6's plan runs here (the cockpit's role); S5's EXFIL_TEST_URL is set inside the compose job itself.
         plan_env={"TOOLS_BASE_URL": tools, "LLM_BASE_URL": llm, "IDP_BASE_URL": idp, "PARTNER_BASE_URL": partner},
+        secrets=read_secrets(),
     )
 
 
@@ -65,6 +53,7 @@ def tenant() -> DemoEnv:
         name="tenant",
         front_doors={"shop-lb": f"https://shop.{domain}", "ops-lb": f"https://ops.{domain}", "partner-lb": partner},
         plan_env={"PARTNER_BASE_URL": partner},
+        secrets=read_secrets(),
     )
 
 

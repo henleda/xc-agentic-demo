@@ -132,3 +132,14 @@ def test_matching_with_salt_and_hint(real_scenarios, real_personas):
                          personas=real_personas, hint="S3b") is None
     assert find_scenario(real_scenarios, agent_id="insights-nightly", message="anything",
                          sub="job:insights-nightly", personas=real_personas).id == "S5"
+
+
+def test_no_scenario_plan_references_a_secret_variable():
+    """Token steps get client secrets through the plan's env (plan_executor reads ctx.env first). A ${..._SECRET}
+    inside a URL, header or body would substitute the secret into the request and the trace: never allowed."""
+    import re
+
+    from copperline_common.config import repo_root
+
+    for path in sorted((repo_root() / "scenarios").glob("*.yaml")):
+        assert not re.search(r"\$\{[A-Z0-9_]*SECRET[A-Z0-9_]*\}", path.read_text()), path.name

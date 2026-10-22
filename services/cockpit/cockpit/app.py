@@ -1,0 +1,181 @@
+"""cockpit backend. Contract: services/cockpit/README.md and docs/03-services.md ("cockpit").
+
+    GET  /                          the page (static/index.html)
+    GET  /api/state                 personas, scenarios (buttons), console links, current run salt, env
+    POST /api/scenarios/{id}/run    run one scenario the way the stage does -> {verdict, trace, reply, checks, ...}
+    POST /api/chat                  one turn as a persona (rehearsal; on stage use the scenario buttons)
+    GET  /api/estate                ERP counters and AI gateway usage (polled every 2 s by the page)
+    POST /api/reset                 ERP reset, gateway usage reset, new run salt
+
+Scenarios run through copperline_common.demo_driver, the same code scripts/run_scenario.py uses, and are judged the
+same way, so what the presenter sees and what the acceptance check checks can never drift apart. Runs are serialised
+(one at a time): two presenters' clicks would otherwise mix their estate deltas.
+"""
+
+import asyncio
+import secrets
+import subprocess
+from pathlib import Path
+
+import httpx
+from copperline_common import demo_driver
+from copperline_common.logging import log_event
+from copperline_common.personas import Personas
+from copperline_common.scenarios import by_id, load_scenarios
+from copperline_common.service import setup_service
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
+
+from cockpit.settings import Settings
+
+SERVICE = "cockpit"
+STATIC = Path(__file__).resolve().parent / "static"
+JOB_TIMEOUT_S = 300
+
+
+def create_app(settings: Settings, *, job_runner: demo_driver.JobRunner | None = None) -> FastAPI:
+    """job_runner: tests pass a fake; otherwise compose locally, and (Phase 2) a vK8s Job in the tenant."""
+    app = FastAPI(title="copperline-cockpit", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.settings = settings
+    app.state.scenarios = load_scenarios(settings.scenarios_dir)
+    app.state.personas = Personas.load(settings.personas_path)
+    app.state.run_salt = settings.run_salt or secrets.token_hex(4)
+    app.state.lock = asyncio.Lock()
+    app.state.job_runner = job_runner or default_job_runner(settings)
+    setup_service(app, SERVICE)
+    app.add_api_route("/", index, methods=["GET"], include_in_schema=False)
+    app.add_api_route("/api/state", get_state, methods=["GET"])
+    app.add_api_route("/api/scenarios/{scenario_id}/run", run_scenario, methods=["POST"])
+    app.add_api_route("/api/chat", chat, methods=["POST"])
+    app.add_api_route("/api/estate", get_estate, methods=["GET"])
+    app.add_api_route("/api/reset", reset, methods=["POST"])
+    log_event("cockpit_ready", env=settings.env, scenarios=[s.id for s in app.state.scenarios],
+              job_mode=settings.job_mode)
+    return app
+
+
+def default_job_runner(settings: Settings) -> demo_driver.JobRunner | None:
+    if settings.job_mode != "compose" or settings.compose_script is None:
+        return None  # TODO(Phase 2): create a Job from cronjob/insights-nightly via the vK8s API and tail its log
+
+    def compose_job(name: str) -> tuple[int, str, str]:
+        try:
+            done = subprocess.run([str(settings.compose_script), "run", "--rm", "-T", name], capture_output=True,
+                                  text=True, timeout=JOB_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return 124, "", f"the job did not finish within {JOB_TIMEOUT_S} s"
+        return done.returncode, done.stdout, done.stderr
+
+    return compose_job
+
+
+async def index() -> FileResponse:
+    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+
+
+async def get_state(request: Request) -> dict:
+    app = request.app
+    personas = [{"sub": p["sub"], "name": p["name"], "role": p["role"],
+                 "agent": {"customer": "shopper", "store_associate": "storeops"}.get(p["role"], "refunds")}
+                for p in app.state.personas.personas]
+    scenarios = [{"id": s.id, "title": s.title, "persona": s.persona, "agent": s.agent, "message": s.message,
+                  "repeat_message": s.repeat_message, "console_link": app.state.settings.console_links.get(s.id)}
+                 for s in app.state.scenarios]
+    return {"env": app.state.settings.env, "run_salt": app.state.run_salt, "personas": personas,
+            "scenarios": scenarios, "job_mode": app.state.settings.job_mode}
+
+
+async def run_scenario(scenario_id: str, request: Request) -> JSONResponse:
+    app = request.app
+    scenario = by_id(app.state.scenarios, scenario_id)
+    if scenario is None:
+        return JSONResponse({"error": "not_found", "detail": f"no scenario {scenario_id!r}"}, status_code=404)
+    settings: Settings = app.state.settings
+    async with app.state.lock:
+        # The driver is blocking (httpx sync, subprocess): keep it off the event loop so the estate poll still answers.
+        outcome = await run_in_threadpool(demo_driver.run_one, scenario, settings.endpoints, app.state.personas,
+                                          app.state.run_salt, app.state.job_runner)
+    # The same plan env the runner judges against, so a stale image is an ERROR here too, not just in the runner.
+    plan_env = {**settings.endpoints.plan_env, "TOOLS_BASE_URL": settings.endpoints.tools_base_url or "x",
+                "LLM_BASE_URL": settings.endpoints.llm_base_url or "x",
+                "IDP_BASE_URL": settings.endpoints.idp_base_url or "x", "EXFIL_TEST_URL": "x"}
+    result = demo_driver.judge(scenario, settings.env, outcome, plan_env)
+    log_event("scenario_run", scenario=scenario.id, verdict=result["verdict"], steps=len(result["trace"]),
+              run_salt=app.state.run_salt)
+    return JSONResponse({**result, "run_salt": app.state.run_salt})
+
+
+async def chat(request: Request) -> JSONResponse:
+    """One turn as a persona: {sub, messages[, scenario_hint]}. Rehearsal only; the stage uses scenario buttons."""
+    app = request.app
+    body = await request.json()
+    persona = app.state.personas.get(str(body.get("sub", "")))
+    messages = body.get("messages")
+    if persona is None or not isinstance(messages, list) or not messages:
+        return JSONResponse({"error": "bad_request", "detail": "need a known sub and a non-empty messages list"},
+                            status_code=400)
+    agent = {"customer": "shopper", "store_associate": "storeops"}.get(persona["role"], "refunds")
+    endpoints: demo_driver.Endpoints = app.state.settings.endpoints
+
+    def turn() -> dict:
+        with httpx.Client(timeout=demo_driver.CHAT_TIMEOUT_S) as client:
+            token, problem = demo_driver.login(client, endpoints, persona["sub"], persona["role"], app.state.run_salt)
+            if token is None:
+                return {"error": problem, "trace": []}
+            response, started = demo_driver.chat(client, endpoints, agent, persona["role"], token, messages,
+                                                 body.get("scenario_hint"))
+        if response.status_code != 200:
+            return {"error": f"chat answered HTTP {response.status_code}",
+                    "trace": [demo_driver.front_door_row(1, response, started)]}
+        return response.json()
+
+    async with app.state.lock:
+        try:
+            result = await run_in_threadpool(turn)
+        except httpx.HTTPError as e:
+            result = {"error": f"unreachable: {type(e).__name__} (is the stack up?)", "trace": []}
+    return JSONResponse(result)
+
+
+async def get_estate(request: Request) -> dict:
+    """ERP counters and recent writes, and AI gateway token usage. A missing source is null, never an error."""
+    endpoints: demo_driver.Endpoints = request.app.state.settings.endpoints
+    async with httpx.AsyncClient(timeout=2) as client:
+        erp, usage = await asyncio.gather(_get_json(client, _url(endpoints.erp_admin_url, "/admin/state")),
+                                          _get_json(client, _url(endpoints.aigw_admin_url, "/v1/usage")))
+    return {"erp": erp, "ai_gateway": usage, "run_salt": request.app.state.run_salt}
+
+
+async def _get_json(client: httpx.AsyncClient, url: str | None) -> dict | None:
+    if not url:
+        return None  # that source is not configured here
+    try:
+        response = await client.get(url)
+        return response.json() if response.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+async def reset(request: Request) -> dict:
+    """What scripts/reset_demo.sh will do: ERP back to seed, gateway usage to zero, a new salt for Mallory."""
+    endpoints: demo_driver.Endpoints = request.app.state.settings.endpoints
+    async with request.app.state.lock, httpx.AsyncClient(timeout=10) as client:
+        erp = await _post_ok(client, _url(endpoints.erp_admin_url, "/admin/reset"))
+        usage = await _post_ok(client, _url(endpoints.aigw_admin_url, "/v1/usage/reset"))
+        request.app.state.run_salt = secrets.token_hex(4)
+    log_event("demo_reset", erp=erp, ai_gateway=usage, run_salt=request.app.state.run_salt)
+    return {"erp": erp, "ai_gateway": usage, "run_salt": request.app.state.run_salt}
+
+
+def _url(base: str | None, path: str) -> str | None:
+    return f"{base}{path}" if base else None
+
+
+async def _post_ok(client: httpx.AsyncClient, url: str | None) -> bool:
+    if not url:
+        return False
+    try:
+        return (await client.post(url)).status_code == 200
+    except httpx.HTTPError:
+        return False

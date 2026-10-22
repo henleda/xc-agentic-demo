@@ -189,7 +189,9 @@ async def _run_token(step: PlanStep, ctx: ExecContext, request_id: str) -> Step:
     # The preview is built from the plan spec, which never holds the secret (that comes from env).
     trace = Step(n=0, i=step.i, kind="token", target=url, args_preview=_args_preview(spec), request_id=request_id)
 
-    secret = credentials.client_secret(client_id)
+    # From the plan's env first (ctx.env, which defaults to os.environ), so a caller can hand a plan a secret without
+    # writing it into its own process environment (the cockpit runs S6 many times in one long-lived process).
+    secret = ctx.env.get(credentials.secret_env_name(client_id)) or credentials.client_secret(client_id)
     # client_credentials() takes no headers: the step's request ID reaches the IdP through the
     # x-request-id hook of new_http_client(), which reads request_id_var (set in _run_step).
     result = await client_credentials(ctx.http, url, client_id, secret, audience)

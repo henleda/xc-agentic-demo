@@ -6,6 +6,7 @@ requires-python = "==3.12.*"
 members = [
     "copperline-agent-runtime",
     "copperline-ai-gw",
+    "copperline-cockpit",
     "copperline-common",
     "copperline-demo",
     "copperline-erp-mock",
@@ -174,6 +175,25 @@ requires-dist = [
 ]
 
 [[package]]
+name = "copperline-cockpit"
+version = "0.1.0"
+source = { editable = "services/cockpit" }
+dependencies = [
+    { name = "copperline-common" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "copperline-common", editable = "services/common" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
 name = "copperline-common"
 version = "0.1.0"
 source = { editable = "services/common" }
@@ -199,6 +219,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "copperline-agent-runtime" },
     { name = "copperline-ai-gw" },
+    { name = "copperline-cockpit" },
     { name = "copperline-common" },
     { name = "copperline-erp-mock" },
     { name = "copperline-idp" },
@@ -219,6 +240,7 @@ dev = [
 requires-dist = [
     { name = "copperline-agent-runtime", editable = "services/agent-runtime" },
     { name = "copperline-ai-gw", editable = "services/ai-gw" },
+    { name = "copperline-cockpit", editable = "services/cockpit" },
     { name = "copperline-common", editable = "services/common" },
     { name = "copperline-erp-mock", editable = "services/erp-mock" },
     { name = "copperline-idp", editable = "services/idp" },

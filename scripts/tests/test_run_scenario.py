@@ -144,6 +144,7 @@ import json  # noqa: E402
 import subprocess  # noqa: E402
 
 import demo_env  # noqa: E402
+from copperline_common import demo_driver  # noqa: E402
 from copperline_common.personas import Personas  # noqa: E402
 
 PERSONAS = Personas.load(REPO / "config/personas.yaml")
@@ -167,7 +168,7 @@ def test_a_hop_that_is_down_is_this_scenarios_error_not_a_crash(monkeypatch, err
     def handler(request):
         error.request = request
         raise error
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(handler))
     outcome = run_scenario.run_one(by_id(SCENARIOS, "S0"), demo_env.local(), PERSONAS, "salt1")
     assert outcome["trace"] == [] and says in outcome["error"]
 
@@ -179,7 +180,7 @@ def test_a_body_that_is_not_json_is_an_error_not_a_crash(monkeypatch):
         if request.url.path == "/admin/state":
             return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
         return httpx.Response(200, text="<html>not json</html>")
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(handler))
     outcome = run_scenario.run_one(by_id(SCENARIOS, "S0"), demo_env.local(), PERSONAS, "salt1")
     assert "JSONDecodeError" in outcome["error"]
 
@@ -198,7 +199,7 @@ def test_a_job_that_exits_non_zero_after_some_steps_is_an_error_not_a_pass(monke
                                    (2, "tool", 403, "xc", "orders.list_customer_orders"))]
     done = subprocess.CompletedProcess([], 137, stdout="\n".join("TRACE " + line for line in lines), stderr="Killed")
     monkeypatch.setattr(run_scenario.subprocess, "run", lambda *a, **kw: done)
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(
         lambda r: httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})))
     s5 = by_id(SCENARIOS, "S5")
     result = run_scenario.check(s5, "local", run_scenario.run_one(s5, demo_env.local(), PERSONAS, "x"))
@@ -209,7 +210,7 @@ def test_a_job_that_hangs_is_an_error(monkeypatch):
     def hang(*args, **kwargs):
         raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout"))
     monkeypatch.setattr(run_scenario.subprocess, "run", hang)
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(
         lambda r: httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})))
     outcome = run_scenario.run_one(by_id(SCENARIOS, "S5"), demo_env.local(), PERSONAS, "x")
     assert "did not finish" in outcome["error"]
@@ -246,7 +247,7 @@ def test_s7_sends_its_message_repeat_message_times_and_records_each_answer(monke
             return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
         chats.append(json.loads(request.content))
         return httpx.Response(403, json={"error": "blocked"})  # no origin header: the fabric
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(handler))
     s7 = by_id(SCENARIOS, "S7")
     outcome = run_scenario.run_one(s7, demo_env.local(), PERSONAS, "salt1")
     assert len(chats) == s7.repeat_message and all(c["scenario_hint"] == "S7" for c in chats)
@@ -262,7 +263,7 @@ def test_mallory_logs_in_with_the_runs_salt(monkeypatch):
             logins.append(json.loads(request.content))
             return httpx.Response(500)
         return httpx.Response(200, json={"refunds_issued": 0, "stock_writes": 0})
-    monkeypatch.setattr(run_scenario.httpx, "Client", fake_client(handler))
+    monkeypatch.setattr(demo_driver.httpx, "Client", fake_client(handler))
     run_scenario.run_one(by_id(SCENARIOS, "S1"), demo_env.local(), PERSONAS, "abc123")
     assert logins == [{"sub": "mallory.x", "run_salt": "abc123"}]
 

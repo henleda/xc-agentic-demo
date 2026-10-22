@@ -5,6 +5,7 @@ on the same hostnames docker compose uses. Nothing listens on a socket: an httpx
 an ASGI app. So the tests exercise the same intent files, tokens, policies and MCP contracts as the containers.
 """
 
+import asyncio
 import json
 import shutil
 from dataclasses import dataclass
@@ -218,3 +219,59 @@ def stack(tmp_path, config_dir, rsa_key, jwks_path, monkeypatch):
 
     yield Stack(http=http, db=db, usage=usage, mesh=mesh)
     db.close()
+
+
+# ---- the published local ports, served by the in-process stack (smoke and cockpit tests) --------------------------
+
+# The published local ports -> the in-process hostnames the stack fixture serves.
+PORT_HOST = {8001: "shop-lb", 8002: "ops-lb", 8003: "partner-lb", 8011: "tools.agentic-demo",
+             8012: "llm.agentic-demo", 8013: "idp.agentic-demo", 8014: "erp.agentic-demo",
+             8181: "erp-mock-admin", 8190: "ai-gw-admin"}
+STACK_SECRETS = {"AGENT_SHOPPER_SECRET": "s-shopper", "AGENT_STOREOPS_SECRET": "s-storeops",
+                 "AGENT_REFUNDS_SECRET": "s-refunds", "SVC_MCP_SECRET": "s-svc", "GRANITE_SUPPLY_SECRET": "s-granite"}
+
+
+class SyncOverStack(httpx.BaseTransport):
+    """smoke_test uses a sync httpx.Client; the stack is async ASGI. Route 127.0.0.1:<port> to the right app."""
+
+    def __init__(self, stack) -> None:
+        self.stack = stack
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        url = request.url.copy_with(scheme="http", host=PORT_HOST[request.url.port], port=None)
+
+        async def go():
+            response = await self.stack.http.request(request.method, url, headers=request.headers,
+                                                     content=request.read())
+            return httpx.Response(response.status_code, headers=response.headers, content=response.content)
+
+        return asyncio.run(go())
+
+
+@pytest.fixture
+def local_ports(stack, monkeypatch):
+    """Make sync httpx.Client calls to the published local ports (127.0.0.1:8001 ...) reach the in-process stack, as
+    scripts and the cockpit backend do against compose. Returns the stack's client secrets (what secrets.env holds)."""
+    real_client = httpx.Client
+
+    def client_on_stack(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return real_client(transport=SyncOverStack(stack), **kwargs)
+
+    class AsyncOverStack(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            url = request.url.copy_with(scheme="http", host=PORT_HOST[request.url.port], port=None)
+            response = await stack.http.request(request.method, url, headers=request.headers,
+                                                content=await request.aread())
+            return httpx.Response(response.status_code, headers=response.headers, content=response.content)
+
+    real_async = httpx.AsyncClient
+
+    def async_on_stack(*args, **kwargs):
+        if "transport" in kwargs:  # the stack's own clients pass a transport: leave them alone
+            return real_async(*args, **kwargs)
+        return real_async(transport=AsyncOverStack(), **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", client_on_stack)
+    monkeypatch.setattr(httpx, "AsyncClient", async_on_stack)
+    return dict(STACK_SECRETS)

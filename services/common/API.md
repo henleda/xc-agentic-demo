@@ -327,7 +327,7 @@ def tool_summary(earlier: list[Step]) -> str | None
 
 - **Setup.** It calls `expand_plan(scenario.plan, ctx.env)` and runs steps in order. Consecutive steps from one `group` with `concurrency > 1` run in batches of that size with `asyncio.gather`. The resulting steps are sorted by `i`, and `n` is assigned sequentially from `start_n`.
 - **`token` step.**
-  - Calls `client_credentials` with `url` = `spec.url` or `${idp_base_url}/auth/token`, and with the secret from `credentials.client_secret(client_id)`.
+  - Calls `client_credentials` with `url` = `spec.url` or `${idp_base_url}/auth/token`, and with the secret from `ctx.env[secret_env_name(client_id)]`, else `credentials.client_secret(client_id)` (the process env). `ctx.env` defaults to `os.environ`, so callers that set nothing see no difference; the cockpit passes S6's secret this way instead of writing it into its own environment.
   - On success, saves the token under `save_as` and under `"aud:<audience>"`.
   - The trace Step has `kind: "token"` and `identity`, holding `agent_id`, `agent_role`, `obo_sub`, `obo_role`, `aud` and `sub` from the claims (keys absent from the claims are omitted).
   - `target` is the URL. It is never a secret: no secret ever appears in `args_preview` or `result_preview`.
