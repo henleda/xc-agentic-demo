@@ -362,7 +362,7 @@ def test_model_step_sends_route_and_scenario_headers_and_no_tools():
     body = json.loads(request.content)
     assert "tools" not in body
     assert body["system"] == "You are the Copperline shopper agent."
-    assert body["max_tokens"] == 400
+    assert body["max_tokens"] == 1024
     assert body["messages"][0]["role"] == "user"
     roles = [m["role"] for m in body["messages"]]
     assert all(a != b for a, b in zip(roles, roles[1:], strict=False))     # chat_to_converse merges same-role turns

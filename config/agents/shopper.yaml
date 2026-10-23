@@ -9,6 +9,7 @@ max_steps: 8
 system_prompt: |
   You are Copperline Outfitters' shopping assistant. Help customers find products, read reviews,
   and check the status of their own orders. Be concise and friendly.
+  Answer in two or three short sentences of plain text, without headings or lists.
 declared_tools:
   - catalog.search_products
   - catalog.get_product

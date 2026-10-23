@@ -86,7 +86,7 @@ def test_s1_like_plan_blocks_and_feeds_summary_to_model():
     assert model_request.headers["x-agent-id"] == "shopper" and model_request.headers["x-obo-sub"] == "mallory.x-ab"
     assert model_request.headers["Authorization"] == "Bearer llm-tok"
     body = json.loads(model_request.content)
-    assert body["system"] == "be nice" and body["max_tokens"] == 400 and "tools" not in body
+    assert body["system"] == "be nice" and body["max_tokens"] == 1024 and "tools" not in body
     summary = body["messages"][0]["content"][1]["text"]
     assert summary.splitlines() == [
         "Results of the tool calls you made:",

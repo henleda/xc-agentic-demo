@@ -25,7 +25,7 @@ from copperline_common.xcblock import classify, model_feedback
 PREVIEW_LIMIT = 4000
 ARGS_PREVIEW_LIMIT = 300
 SUMMARY_RESULT_LIMIT = 1500
-MODEL_MAX_TOKENS = 400
+MODEL_MAX_TOKENS = 1024  # room for a whole reply from a real model; the agent prompts ask for a short one
 
 TOOLS_AUDIENCE = "copperline-tools"
 LLM_AUDIENCE = "copperline-llm"
