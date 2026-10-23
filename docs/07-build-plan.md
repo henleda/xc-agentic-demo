@@ -44,7 +44,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 
 1. Build multi-arch images. Verify they run as an arbitrary UID: `docker run --user 1000770000:0`. Push them.
 2. Apply `deploy/vk8s/*.yaml`, with secrets rendered.
-3. Run compose on EC2 `copperline-core` (`deploy/aws/core/docker-compose.yaml`).
+3. Run compose on EC2 `copperline-core` (`deploy/aws/core/docker-compose.yaml`), with `GATEWAY_REQUIRE_KEY=false` in its `.env`: the plain llm-lb does not add ai-gw's `x-api-key` yet, so with the check on every model call would be a 401 (docs/08 R40).
 4. Create all origin pools and LBs with **only** routing and advertisement configured. No JWT, policies, WAF or rate limits yet.
 5. Run the advertisement check from `docs/04`.
 
@@ -57,6 +57,8 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 ## Phase 3: Turn on XC controls one at a time (about 3 days)
 
 Order: JWT validation → user identification → `sp-tools` and `sp-llm` (generated) → `sp-ops`, `sp-idp`, `erp-lb` rules → rate limiters → WAF → Data Guard → API definitions (Report first, then Block) → malicious user detection → llm-lb header injection → vK8s network policy.
+
+At the llm-lb header injection step, set `GATEWAY_REQUIRE_KEY=true` on EC2 (or delete the line from its `.env`), restart ai-gw, and re-run S0: a 401 from ai-gw means the injection is not working (docs/08 R10, R40).
 
 After each step, re-run the smoke test and every scenario that touches that control. Record the actual XC block response (status code, headers, body) in `docs/08`, and update the XC block detector in `services/common`.
 

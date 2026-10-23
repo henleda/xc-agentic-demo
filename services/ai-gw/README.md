@@ -63,7 +63,7 @@ Local compose defaults to stub mode (`LOCAL_STUB_MODEL`, default `true`); `deplo
 |---|---|---|
 | `DEMO_STUB_MODEL` | `false` | `true` for canned replies |
 | `GATEWAY_API_KEY` | — | Required when `GATEWAY_REQUIRE_KEY` is true (the default); ai-gw refuses to start without it |
-| `GATEWAY_REQUIRE_KEY` | `true` | Check `x-api-key` |
+| `GATEWAY_REQUIRE_KEY` | `true` | Check `x-api-key`. On EC2, `false` only until XC llm-lb injects the key (Phase 2 to the Phase 3 header-injection step, docs/08 R40) |
 | `AWS_REGION` | — | Required in Bedrock mode |
 | `ROUTE_FAST`, `ROUTE_STANDARD`, `ROUTE_PREMIUM` | — | Model IDs; Bedrock mode needs at least one |
 | `BUDGET_TOKENS_FAST`, `_STANDARD`, `_PREMIUM` | `200000` | Tokens per UTC day per route |

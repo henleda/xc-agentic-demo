@@ -65,9 +65,9 @@ Each step had a review round (reviewers plus adversarial skeptics); confirmed fi
 - The latency bench client (`measure_latency.py`) is Phase 4.
 - `scripts/check_bedrock.py` (one Converse call per route from EC2 through the VPC endpoint) is still to build; the probe used here can be its starting point.
 
-## Decide before Phase 2
+## Decided before Phase 2
 
-- **R40: ai-gw's API key versus plain llm-lb.** ai-gw on EC2 requires `x-api-key`, but Phase 2 runs llm-lb with routing only, and llm-lb header injection comes late in Phase 3: every model call would be a 401. Either add header injection to the plain Phase 2 llm-lb (R10 is doc-confirmed), or run Phase 2 with `GATEWAY_REQUIRE_KEY=false` and flip it before Phase 3.
+- **R40: ai-gw's API key versus plain llm-lb.** ai-gw on EC2 requires `x-api-key`, but Phase 2 runs llm-lb with routing only, and llm-lb header injection is the second-to-last Phase 3 step: every model call would be a 401. Decided: EC2 runs ai-gw with `GATEWAY_REQUIRE_KEY=false` (a variable in `deploy/aws/core/docker-compose.yaml`, default `true`, pinned by a test) until that Phase 3 step, which turns it on and re-runs S0 (docs/07). `preflight.sh` must call it a no-go while it is off.
 
 ## What Phase 2 needs
 

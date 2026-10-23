@@ -12,7 +12,7 @@
 | `run_scenario.py` | **working** (`--env local`); tenant in Phase 2 | `--all \| S1 S3a ... --env local [--runs N] [--dry]`: runs each scenario the way the stage does it (agent chats through the front doors with `scenario_hint`, S5 as the compose job, S6 played by this script through partner-lb), checks `expect.<env>`, writes `results/scenarios-<ts>.json`. S4 and S6 run last; between runs it waits 65 s after the last S4/S6 call. "No expectations" never counts as a pass. `make local-scenarios` (`RUNS=3` for three runs in a row locally; the definition of done is the same against the tenant, `make scenarios`). `--dry` expands every plan and sends nothing. Tenant runs and `--discovery-seed` come with the cockpit (Phase 2) |
 | `measure_latency.py` | to build (Phase 4) | Measures RE→CE vs RE-local tool calls per RE and the 30-call loop overhead → `results/latency.json` |
 | `reset_demo.sh` | to build | ERP reset, gateway usage reset, new `RUN_SALT`, wait for rate-limit windows; under 60 s |
-| `preflight.sh` | to build | Reset + smoke + `run_scenario --all --dry` + print the go/no-go table |
+| `preflight.sh` | to build | Reset + smoke + `run_scenario --all --dry` + print the go/no-go table. No-go while EC2 ai-gw runs with `GATEWAY_REQUIRE_KEY=false` (docs/08 R40) |
 
 ## `gen_keys.py`
 

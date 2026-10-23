@@ -572,3 +572,15 @@ def test_settings_defaults_from_env(monkeypatch):
     assert (s.port, s.admin_port, s.require_key) == (8090, 8190, True)
     monkeypatch.setenv("AIGW_ADMIN_PORT", "9190")
     assert Settings.from_env().admin_port == 9190
+
+
+def test_ec2_compose_requires_the_key_unless_env_turns_it_off():
+    """docs/08 R40: Phase 2 sets GATEWAY_REQUIRE_KEY=false in EC2's .env until llm-lb injects x-api-key. Deleting that
+    line must turn the check back on, so the compose default has to stay true."""
+    from pathlib import Path
+
+    import yaml
+
+    compose = Path(__file__).resolve().parents[3] / "deploy/aws/core/docker-compose.yaml"
+    env = yaml.safe_load(compose.read_text())["services"]["copperline-ai-gw"]["environment"]
+    assert env["GATEWAY_REQUIRE_KEY"] == "${GATEWAY_REQUIRE_KEY:-true}"
