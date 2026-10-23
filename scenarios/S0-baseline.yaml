@@ -21,4 +21,6 @@ expect:
     xc_log_hint: "tools-lb request logs, user=shopper: /mcp/catalog served on RE, /mcp/orders origin on copperline-aws-ce"
   local:
     steps:
+      - { i: 0, status: 200 }
       - { i: 1, status: 200 }
+      - { i: 2, status: 200 }   # the model hop: a 502 from Bedrock must fail S0 (docs/07, real-Bedrock check)

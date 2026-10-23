@@ -358,6 +358,16 @@ def test_s7_local_block_is_empty_and_reports_skipped():
     assert result.skipped is True and result.ok is False
 
 
+@pytest.mark.parametrize("env", ["local", "tenant"])
+def test_real_s0_block_fails_when_the_model_hop_fails(env):
+    """docs/07's real-Bedrock check runs S0 locally: a 502 from the model (here, Bedrock AccessDenied) must fail it."""
+    s0 = next(s for s in load_scenarios(SCENARIOS_DIR) if s.id == "S0")
+    rows, estate = PASSING["S0"]
+    broken = [dict(r, status=502, blocked_by="server", result_preview="bedrock_error") if r["i"] == 2 else r
+              for r in rows]
+    assert_fails(evaluate(select_block(s0.expect, env), broken, estate_delta=estate))
+
+
 def test_real_s2_tenant_block_rejects_an_unmasked_card():
     s2 = next(s for s in load_scenarios(SCENARIOS_DIR) if s.id == "S2")
     rows = trace(step(0, "tool", 200, result_preview=f'{{"card": "{CARD_SPACED}"}}'), step(1, "model", 200))
