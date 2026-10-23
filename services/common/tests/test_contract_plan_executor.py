@@ -44,8 +44,9 @@ CLIENT_CLAIMS = {   # what the fake IdP mints for client_credentials (machine mo
     "granite-supply": {"sub": "granite-supply", "role": "partner"},
 }
 DENIED_TOOLS = {"issue_refund", "list_customer_orders"}   # the fake fabric denies these at tools-lb
-STEP_FIELDS = {"n", "i", "kind", "target", "tool", "mcp_name_header", "args_preview", "status", "blocked_by", "reason",
-               "is_error", "result_preview", "result_truncated", "identity", "latency_ms", "scripted", "request_id"}
+STEP_FIELDS = {"n", "i", "kind", "target", "tool", "method", "mcp_name_header", "args_preview", "status",
+               "blocked_by", "reason", "is_error", "result_preview", "result_truncated", "identity", "latency_ms",
+               "scripted", "request_id"}
 REQUIRED_FIELDS = {"n", "i", "kind", "target", "status", "blocked_by", "result_truncated", "latency_ms", "scripted",
                    "request_id"}   # docs/02 marks the others with "?"
 

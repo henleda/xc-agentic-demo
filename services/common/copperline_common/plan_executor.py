@@ -44,6 +44,7 @@ class Step:
     kind: str
     target: str
     tool: str | None = None
+    method: str | None = None  # http steps: the HTTP method (GET, POST, ...)
     mcp_name_header: str | None = None
     args_preview: str | None = None
     status: int | None = None
@@ -286,7 +287,7 @@ async def _run_http(step: PlanStep, ctx: ExecContext, request_id: str) -> Step:
     spec = step.spec["http"]
     method = str(spec["method"]).upper()
     url = str(spec["url"])
-    trace = Step(n=0, i=step.i, kind="http", target=url, args_preview=_args_preview(spec.get("body")),
+    trace = Step(n=0, i=step.i, kind="http", target=url, method=method, args_preview=_args_preview(spec.get("body")),
                  request_id=request_id)
 
     headers = {REQUEST_ID_HEADER: request_id, **(spec.get("headers") or {})}

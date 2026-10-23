@@ -40,7 +40,7 @@ def local() -> DemoEnv:
         aigw_admin_url="http://127.0.0.1:8190",
         # S6's plan runs here (the cockpit's role); S5's EXFIL_TEST_URL is set inside the compose job itself.
         plan_env={"TOOLS_BASE_URL": tools, "LLM_BASE_URL": llm, "IDP_BASE_URL": idp, "PARTNER_BASE_URL": partner},
-        secrets=read_secrets(),
+        secrets=partner_secrets(),
     )
 
 
@@ -53,7 +53,7 @@ def tenant() -> DemoEnv:
         name="tenant",
         front_doors={"shop-lb": f"https://shop.{domain}", "ops-lb": f"https://ops.{domain}", "partner-lb": partner},
         plan_env={"PARTNER_BASE_URL": partner},
-        secrets=read_secrets(),
+        secrets=partner_secrets(),
     )
 
 
@@ -84,6 +84,16 @@ def for_name(name: str) -> DemoEnv:
     if name == "tenant":
         return tenant()
     raise SystemExit(f"--env must be local or tenant, got {name!r}")
+
+
+def partner_secrets() -> dict[str, str]:
+    """Only the partner clients' secrets (what S6 needs) from .secrets/secrets.env: an Endpoints never holds more."""
+    from copperline_common.credentials import secret_env_name
+    from copperline_common.personas import Personas
+
+    clients = Personas.load(ROOT / "config/personas.yaml").clients
+    names = {secret_env_name(c["client_id"]) for c in clients if c.get("kind") == "partner"}
+    return {name: value for name, value in read_secrets().items() if name in names}
 
 
 def read_secrets() -> dict[str, str]:

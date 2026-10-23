@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from copperline_common.requestid import REQUEST_ID_HEADER, current_request_id
+from copperline_common.requestid import REQUEST_ID_HEADER, current_request_id, new_request_id, request_id_var
 
 
 @dataclass
@@ -23,6 +23,21 @@ class HttpResult:
 async def _add_request_id(request: httpx.Request) -> None:
     if REQUEST_ID_HEADER not in request.headers:
         request.headers[REQUEST_ID_HEADER] = current_request_id()
+
+
+def _add_request_id_sync(request: httpx.Request) -> None:
+    # The current request's ID if there is one; otherwise a fresh one for this call only. Unlike current_request_id(),
+    # never store one: blocking callers often run outside any request (scripts), where a stored ID would leak onward.
+    if REQUEST_ID_HEADER not in request.headers:
+        request.headers[REQUEST_ID_HEADER] = request_id_var.get() or new_request_id()
+
+
+def new_sync_http_client(timeout: float | httpx.Timeout = 10.0, **kwargs) -> httpx.Client:
+    """The blocking twin of new_http_client: adds x-request-id (from the current context) to every request. For code
+    that runs in a worker thread (Starlette's run_in_threadpool copies the request's context into it)."""
+    hooks = dict(kwargs.pop("event_hooks", None) or {})
+    hooks["request"] = [_add_request_id_sync, *hooks.get("request", [])]
+    return httpx.Client(timeout=timeout, event_hooks=hooks, **kwargs)
 
 
 def new_http_client(timeout: float = 10.0, **kwargs) -> httpx.AsyncClient:

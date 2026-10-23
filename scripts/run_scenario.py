@@ -170,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
         for scenario in scenarios:
             print(f"  ..    {scenario.id:4} running", end="\r")
             outcome = run_one(scenario, env, personas, run_salt)
-            result = check(scenario, env.name, outcome, {**os.environ, **env.plan_env})
+            job_env = demo_env.job_env(env) if scenario.persona.startswith("job:") else None
+            result = check(scenario, env.name, outcome, demo_driver.judge_env(env, job_env))
             result.update(run=run, run_salt=run_salt)
             results.append(result)
             print_result(result)

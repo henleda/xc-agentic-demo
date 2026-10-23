@@ -71,7 +71,7 @@ It fills the `{{ NAME }}` placeholders in `deploy/vk8s/secrets/*.template.yaml` 
 
 ## `run_scenario.py` and `smoke_test.py`
 
-Both read endpoints from `scripts/demo_env.py`: locally the published 127.0.0.1 ports of the compose stack (front doors 8001–8003, internal LBs 8011–8014, admin 8181/8190). S6's client secret comes from `GRANITE_SUPPLY_SECRET` in the shell, else `.secrets/secrets.env`; nothing is printed.
+Both read endpoints from `scripts/demo_env.py`: locally the published 127.0.0.1 ports of the compose stack (front doors 8001–8003, internal LBs 8011–8014, admin 8181/8190). S6's client secret comes from `.secrets/secrets.env`, else `GRANITE_SUPPLY_SECRET` in the shell; only the partner secret is ever loaded, and it is never printed (an `Endpoints` hides it from its repr).
 
 ```bash
 make local-up                         # on the devbox: make devbox-run CMD="make local-up"

@@ -28,7 +28,7 @@ import httpx
 
 from copperline_common.credentials import secret_env_name
 from copperline_common.expect import evaluate, select_block
-from copperline_common.outbound import HttpResult, new_http_client
+from copperline_common.outbound import HttpResult, new_http_client, new_sync_http_client
 from copperline_common.personas import Personas
 from copperline_common.plan_executor import ExecContext, run_plan
 from copperline_common.scenarios import PlanError, Scenario, expand_plan
@@ -53,7 +53,9 @@ class Endpoints:
     erp_admin_url: str | None = None  # loopback admin ports (on copperline-core in the tenant)
     aigw_admin_url: str | None = None
     plan_env: dict[str, str] = field(default_factory=dict)  # ${VAR} values for plans run in this process (S6)
-    secrets: dict[str, str] = field(default_factory=dict)  # client secrets this process may use (S6's partner)
+    # Client secrets this process may use (only S6's partner). repr=False: an Endpoints in an error message, a log line
+    # or a failing test's assertion must never print a secret.
+    secrets: dict[str, str] = field(default_factory=dict, repr=False)
 
     def front_door_for(self, role: str) -> str:
         return "shop-lb" if role == "customer" else "ops-lb"
@@ -83,12 +85,17 @@ def run_one(scenario: Scenario, endpoints: Endpoints, personas: Personas, run_sa
 
 
 def login(client: httpx.Client, endpoints: Endpoints, sub: str, role: str, run_salt: str) -> tuple[str | None, str]:
-    """(access token, problem) for a demo persona, through its front door."""
+    """(access token, problem) for a demo persona, through its front door. A bad answer is a problem, never an
+    exception; a transport error (front door down) still raises httpx.HTTPError for the caller to report."""
     door = endpoints.front_doors[endpoints.front_door_for(role)]
     response = client.post(f"{door}/auth/demo-login", json={"sub": sub, "run_salt": run_salt})
     if response.status_code != 200:
         return None, f"login as {sub} failed: HTTP {response.status_code}"
-    return response.json()["access_token"], ""
+    try:
+        token = response.json().get("access_token")
+    except (ValueError, AttributeError):
+        token = None
+    return (token, "") if isinstance(token, str) and token else (None, f"login as {sub}: no token in the answer")
 
 
 def chat(client: httpx.Client, endpoints: Endpoints, agent: str, role: str, token: str, messages: list[dict],
@@ -108,7 +115,7 @@ def run_chat(scenario: Scenario, endpoints: Endpoints, personas: Personas, run_s
     if persona is None:
         return {"trace": [], "error": f"persona {scenario.persona!r} is not in config/personas.yaml"}
     messages = [{"role": "user", "content": scenario.message}]
-    with httpx.Client(timeout=CHAT_TIMEOUT_S) as client:
+    with new_sync_http_client(timeout=CHAT_TIMEOUT_S) as client:
         token, problem = login(client, endpoints, scenario.persona, persona["role"], run_salt)
         if token is None:
             return {"trace": [], "error": problem}
@@ -143,7 +150,7 @@ def run_batch_job(scenario: Scenario, endpoints: Endpoints, run_job: JobRunner |
     if run_job is None:
         return {"trace": [], "error": "no way to start the batch job here (local: compose; tenant: a vK8s Job)"}
     job = scenario.persona.removeprefix("job:")
-    with httpx.Client(timeout=10) as client:
+    with new_sync_http_client(timeout=10) as client:
         before = estate(client, endpoints)
         code, stdout, stderr = run_job(job)
         after = estate(client, endpoints)
@@ -193,6 +200,28 @@ def delta(before: dict | None, after: dict | None) -> dict | None:
 # ---- judging --------------------------------------------------------------------------------------------------------
 
 
+def judge_env(endpoints: Endpoints, job_env: dict[str, str] | None = None) -> dict[str, str]:
+    """The env a scenario's plan is expanded with when judging a run (the stale-plan check compares the trace with the
+    expanded plan). Both callers use this, so the cockpit and the acceptance check judge every scenario alike. Only
+    the plan's shape (index, kind, tool) is compared, so a variable's value never matters, only that it resolves: any
+    ${VAR} the endpoints and the job env do not define gets a placeholder."""
+    return _Placeholders({**(job_env or {}), **endpoints.plan_env,
+                          "TOOLS_BASE_URL": endpoints.tools_base_url or "",
+                          "LLM_BASE_URL": endpoints.llm_base_url or "",
+                          "IDP_BASE_URL": endpoints.idp_base_url or ""})
+
+
+class _Placeholders(dict):
+    """A dict that answers every missing or empty variable with a placeholder (for judge_env only)."""
+
+    def __missing__(self, key):
+        return "unset"
+
+    def get(self, key, default=None):
+        value = super().get(key)
+        return value if value else "unset"
+
+
 def judge(scenario: Scenario, env_name: str, outcome: dict, plan_env: dict | None = None) -> dict:
     """The verdict on one outcome: pass / fail / error / no expectations (rules in scripts/run_scenario.py)."""
     result = evaluate(select_block(scenario.expect, env_name), outcome.get("trace", []),
@@ -233,6 +262,7 @@ def wrong_run(scenario: Scenario, outcome: dict, plan_env: dict | None) -> str |
     ran = [(step["i"], step["kind"], step.get("tool")) for step in outcome.get("trace", [])
            if step.get("scripted") and step.get("i") is not None]
     if ran and ran != planned[:len(ran)]:
-        return (f"the trace does not follow scenarios/{scenario.source or scenario.id}: the container runs another "
-                "version of the plan (rebuild: make local-up)")
+        return (f"the trace does not follow scenarios/{scenario.source or scenario.id}: the agents (or the job) run "
+                "another version of the plan than the one this run was judged against. Rebuild and redeploy the "
+                "agent-runtime image (locally: make local-up), and restart the cockpit if it was started earlier")
     return None

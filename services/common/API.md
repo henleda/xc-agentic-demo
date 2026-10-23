@@ -67,6 +67,8 @@ class HttpResult:
 
 def new_http_client(timeout: float = 10.0, **kwargs) -> httpx.AsyncClient
     # event hook adds x-request-id (current_request_id()) to every request unless already set
+def new_sync_http_client(timeout: float | httpx.Timeout = 10.0, **kwargs) -> httpx.Client
+    # the same for a blocking client (code run in a worker thread, e.g. copperline_common.demo_driver in the cockpit)
 async def send(client: httpx.AsyncClient, method: str, url: str, *, retry_connect_once: bool = False, **kwargs) -> HttpResult
     # never raises for HTTP status, any httpx.HTTPError (transport, DecodingError, TooManyRedirects, …) or InvalidURL;
     # returns status=None + error instead ("<ExcType>: <message>" for errors that are not timeout/connect/dns).
