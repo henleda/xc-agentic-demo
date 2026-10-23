@@ -71,6 +71,7 @@ In `config/agents/shopper.yaml`, `declared_tools` includes `refunds.issue_refund
     "kind": "token" | "model" | "tool" | "http",
     "target": str,            # URL called, e.g. http://tools.agentic-demo/mcp/refunds
     "tool": str?,             # fully-qualified tool, e.g. refunds.issue_refund
+    "method": str?,           # http steps: the HTTP method, e.g. POST
     "mcp_name_header": str?,  # only when the Mcp-Name header differs from the body (S1b)
     "args_preview": str?,     # JSON of the arguments, truncated
     "status": int | null,     # null = no HTTP response at all

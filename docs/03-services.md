@@ -106,4 +106,4 @@ See `docs/02-agents.md` → *Agent runtime behavior*.
   - **Right:** an "Estate" panel showing ERP refunds issued and stock writes since reset, polled from `erp-mock /admin/state`, and AI gateway token usage by agent, from `/v1/usage`.
 - **Scenario buttons:** one per scenario. A button pre-fills the persona and message.
 - **Deep links:** an "Open in XC" link per scenario, taken from `.env`, goes to the relevant LB's security events and request logs in the XC console.
-- **Partner tab:** simulates the Granite Supply agent calling `partner.<DEMO_DOMAIN>` with its client-credentials token.
+- **Partner (the S6 button):** the backend plays the Granite Supply agent calling `partner.<DEMO_DOMAIN>` with its client-credentials token. Its four requests (a: purchase orders, b: the internal cost sheet, c: the injected ASN, d: 50 page reads, shown as one summary row) are rows in the trace.

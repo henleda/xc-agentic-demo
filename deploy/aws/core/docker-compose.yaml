@@ -22,8 +22,11 @@ services:
       BUDGET_TOKENS_PREMIUM: ${BUDGET_TOKENS_PREMIUM}
     restart: unless-stopped
   cockpit:
-    image: ${REGISTRY}/cockpit:${IMAGE_TAG}
-    network_mode: host                                # listens on 8095 directly; no ports mapping with host networking                                # reaches 127.0.0.1:8181 and :8190 admin endpoints
-    env_file: [/opt/copperline/.env]
-    volumes: ["/opt/copperline/kubeconfig:/kube/config:ro", "/opt/copperline/scenarios:/app/scenarios:ro"]
+    image: ${REGISTRY}/cockpit:${IMAGE_TAG}         # scenarios/ and personas.yaml are baked in (services/cockpit/Dockerfile)
+    network_mode: host                              # listens on 8095 on all interfaces (cockpit-lb's origin is this
+                                                    # host's private IP), and reaches the 127.0.0.1:8181/8190 admin ports
+    env_file: [/opt/copperline/.env]                # DEMO_DOMAIN, GRANITE_SUPPLY_SECRET, XC_CONSOLE_LINKS, RUN_SALT
+    environment:
+      COCKPIT_ENV: tenant
+    volumes: ["/opt/copperline/kubeconfig:/kube/config:ro"]   # Phase 2: the S5 button creates a vK8s Job with it
     restart: unless-stopped

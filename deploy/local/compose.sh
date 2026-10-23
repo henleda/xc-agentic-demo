@@ -14,12 +14,14 @@
 #      see local_env.py). The shell wins over .env. LOCAL_STUB_MODEL=false switches ai-gw to real Bedrock, which
 #      works on the devbox only: its credentials come from the instance role.
 set -euo pipefail
+# "${UV:-uv}": uv run sets UV to its own path, so this also works when ~/.local/bin is not on PATH (the cockpit
+# running as a systemd user unit starts S5 through this script).
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 RUN="$ROOT/deploy/local/.run"
 cd "$ROOT"
 
-uv run python scripts/gen_keys.py --if-missing
+"${UV:-uv}" run python scripts/gen_keys.py --if-missing
 
 # Copy over the files in place, never delete the directories: running containers have them bind-mounted.
 mkdir -p "$RUN/config" "$RUN/gateway" "$RUN/keys"
@@ -31,6 +33,6 @@ chmod -R a+rX "$RUN"
 
 SIGNING_KEY_PEM="$(cat .secrets/idp-signing-key.pem)"
 export SIGNING_KEY_PEM
-settings="$(uv run python deploy/local/local_env.py .env)"   # exits 2 on a half-configured Bedrock switch
+settings="$("${UV:-uv}" run python deploy/local/local_env.py .env)"   # exits 2 on a half-configured Bedrock switch
 while IFS= read -r line; do [ -n "$line" ] && export "$line"; done <<< "$settings"
 exec docker compose -f deploy/local/docker-compose.yaml --env-file .secrets/secrets.env "$@"
