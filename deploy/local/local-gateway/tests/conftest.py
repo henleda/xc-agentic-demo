@@ -21,6 +21,7 @@ from ai_gw.app import create_admin_app as create_aigw_admin_app
 from ai_gw.app import create_gateway_app as create_aigw_app
 from ai_gw.settings import Settings as AigwSettings
 from ai_gw.usage import Usage
+from copperline_common.demo_driver import Endpoints
 from copperline_common.jwt import public_jwks, sign
 from copperline_common.outbound import new_http_client
 from cryptography.hazmat.primitives import serialization
@@ -275,3 +276,58 @@ def local_ports(stack, monkeypatch):
     monkeypatch.setattr(httpx, "Client", client_on_stack)
     monkeypatch.setattr(httpx, "AsyncClient", async_on_stack)
     return dict(STACK_SECRETS)
+
+
+# ---- the cockpit against the in-process stack (cockpit API and page tests) -----------------------------------------
+
+LOCAL = Endpoints(
+    name="local",
+    front_doors={"shop-lb": "http://127.0.0.1:8001", "ops-lb": "http://127.0.0.1:8002",
+                 "partner-lb": "http://127.0.0.1:8003"},
+    tools_base_url="http://127.0.0.1:8011", llm_base_url="http://127.0.0.1:8012", idp_base_url="http://127.0.0.1:8013",
+    erp_admin_url="http://127.0.0.1:8181", aigw_admin_url="http://127.0.0.1:8190",
+    plan_env={"PARTNER_BASE_URL": "http://127.0.0.1:8003"})
+
+
+def _batch_job_in_process(stack):
+    """S5 without docker: run the real batch mode in this process against the stack, return its TRACE output."""
+    import asyncio
+    import contextlib
+    import io
+    import os
+
+    from agent_runtime.batch import run_batch
+    from agent_runtime.settings import AgentConfig
+    from agent_runtime.settings import Settings as AgentSettings
+
+    def run_job(name: str) -> tuple[int, str, str]:
+        settings = AgentSettings(agent=AgentConfig.load(REPO / f"config/agents/{name}.yaml"), client_secret=None,
+                                 tools_base_url="http://tools.agentic-demo", llm_base_url="http://llm.agentic-demo",
+                                 idp_base_url="http://idp.agentic-demo", config_dir=REPO / "config",
+                                 scenarios_dir=REPO / "scenarios", mode="batch")
+        out = io.StringIO()
+        os.environ["EXFIL_TEST_URL"] = "https://exfil.invalid/rows"
+        with contextlib.redirect_stdout(out):
+            code = asyncio.run(run_batch(settings, http=stack.http))
+        return code, out.getvalue(), ""
+    return run_job
+
+
+@pytest.fixture
+def in_process_job(stack):
+    """S5 without docker: the real batch mode, run in this process against the stack."""
+    return _batch_job_in_process(stack)
+
+
+@pytest.fixture
+def cockpit_settings(stack, local_ports):
+    """cockpit_settings(**overrides) -> cockpit Settings for the local stack (the stack's partner secret included)."""
+    from cockpit.settings import Settings as CockpitSettings
+
+    def _make(**overrides):
+        endpoints = Endpoints(**{**LOCAL.__dict__, "secrets": local_ports})
+        values = dict(env="local", endpoints=endpoints, scenarios_dir=REPO / "scenarios",
+                      personas_path=REPO / "config/personas.yaml")
+        values.update(overrides)
+        return CockpitSettings(**values)
+    return _make

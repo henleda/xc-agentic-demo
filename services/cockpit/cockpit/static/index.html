@@ -13,30 +13,33 @@
     --accent: #0b5cad;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
+  /* A column that fills the window: header, buttons, then the three panels take whatever height is left. */
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
          font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--panel);
+  header { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: var(--panel);
            border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; }
   header .meta { color: var(--muted); font-size: 13px; }
   header .spacer { flex: 1; }
-  .scenarios { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 16px; background: var(--panel);
+  .scenarios { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; background: var(--panel);
                border-bottom: 1px solid var(--line); }
   button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-           border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+           border-radius: 6px; padding: 5px 10px; cursor: pointer; }
   button:hover { border-color: var(--accent); }
   button:disabled { opacity: .5; cursor: wait; }
   button.scenario b { color: var(--accent); margin-right: 4px; }
+  button.scenario .who { color: var(--muted); font-size: 12px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  main { display: grid; grid-template-columns: 300px 1fr 300px; gap: 12px; padding: 12px 16px;
-         height: calc(100vh - 118px); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px 1fr 250px; gap: 12px;
+         padding: 12px 16px; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px;
             overflow: auto; min-height: 0; }
   section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
                margin: 0 0 8px; }
   select, textarea { font: inherit; width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 6px; }
-  textarea { height: 70px; resize: vertical; }
-  .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; }
+  textarea { height: 60px; resize: vertical; }
+  .msg { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
   .msg.user { background: #eef3fb; }
   .msg.agent { background: #f2f2f2; }
   .msg.error { background: var(--warn-bg); color: var(--warn); }
@@ -44,23 +47,35 @@
   .verdict.pass { background: var(--ok-bg); color: var(--ok); }
   .verdict.fail, .verdict.error { background: var(--xc-bg); color: var(--xc); }
   .verdict.none { background: #eee; color: var(--muted); }
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  td, th { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  #acts { font-size: 15px; margin: 2px 0 8px; }
+  #acts b { color: var(--accent); }
+  #problem { margin: 0 0 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
+  td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  col.n { width: 40px; } col.who { width: 58px; } col.step { width: 190px; } col.status { width: 54px; }
+  col.by { width: 62px; } col.ms { width: 44px; }
+  /* One line per allowed step, so long traces fit; a blocked or failed row wraps, so its reason is read in full. */
+  td.step, td.detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  tr.xc td.detail, tr.amber td.detail { white-space: normal; overflow-wrap: anywhere; color: var(--ink); }
+  td.detail.key { white-space: normal; color: var(--ink); }  /* a tool's key field (the card number) is never cut */
+  td.detail { color: var(--muted); font-size: 13px; }
   tr.ok td.status { color: var(--ok); }
   tr.xc { background: var(--xc-bg); }
   tr.xc td.status, tr.xc td.by { color: var(--xc); font-weight: 700; }
   tr.amber { background: var(--warn-bg); }
   tr.amber td.status, tr.amber td.by { color: var(--warn); font-weight: 700; }
+  .tag { display: inline-block; font-size: 11px; padding: 0 5px; border-radius: 3px; background: #eef1f5;
+         color: var(--muted); }
+  .tag.model { background: #eef3fb; color: var(--accent); }
   td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  td.detail { color: var(--muted); font-size: 13px; max-width: 420px; overflow-wrap: anywhere; }
   .stat { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--line); }
   .stat b { font-size: 22px; font-variant-numeric: tabular-nums; }
   .small { color: var(--muted); font-size: 12px; }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line);
           border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (max-width: 1100px) { main { grid-template-columns: 1fr; height: auto; } }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } body { height: auto; } }
 </style>
 </head>
 <body>
@@ -68,7 +83,7 @@
   <h1>Copperline cockpit</h1>
   <span class="meta" id="meta">loading…</span>
   <span class="spacer"></span>
-  <button id="reset" title="ERP back to seed, AI gateway usage to zero, new run salt">Reset demo</button>
+  <button id="reset" title="ERP back to seed, AI gateway usage to zero, new run salt, clears this page">Reset demo</button>
 </header>
 <div class="scenarios" id="scenarios"></div>
 <main>
@@ -79,14 +94,18 @@
     <textarea id="input" placeholder="Rehearsal only. On stage, use the scenario buttons."></textarea>
     <button class="primary" id="send" style="margin-top:6px">Send</button>
   </section>
-  <section>
+  <section id="trace-panel">
     <h2>Trace <span id="verdict"></span></h2>
     <div id="title" class="small"></div>
+    <div id="acts"></div>
+    <div id="problem"></div>
     <table>
-      <thead><tr><th>#</th><th>i</th><th>step</th><th>status</th><th>blocked by</th><th>ms</th><th>detail</th></tr></thead>
+      <colgroup><col class="n"><col class="who"><col class="step"><col class="status"><col class="by"><col class="ms">
+        <col></colgroup>
+      <thead><tr><th>#</th><th title="who decided this step: the scenario script or the model">by</th><th>step</th>
+        <th>status</th><th>blocked</th><th>ms</th><th>detail</th></tr></thead>
       <tbody id="trace"><tr><td colspan="7" class="small">Pick a scenario.</td></tr></tbody>
     </table>
-    <div id="checks" class="small" style="margin-top:8px"></div>
   </section>
   <section>
     <h2>Estate</h2>
@@ -114,22 +133,73 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+// Every backend answer as {ok, status, body}: never throws. A non-JSON answer (an LB error page, a timeout) is
+// reported as such, with its HTTP status, instead of leaving a spinner or blaming the backend.
 async function api(path, options = {}) {
-  const response = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
-  return response.json();
+  let response;
+  try {
+    response = await fetch(path, { headers: { "content-type": "application/json" }, ...options });
+  } catch (e) {
+    return { ok: false, status: 0, body: { error: "the cockpit backend is unreachable" } };
+  }
+  let body;
+  try { body = await response.json(); }
+  catch (e) { body = { error: `the cockpit answered HTTP ${response.status} with something that is not JSON` }; }
+  return { ok: response.ok, status: response.status, body };
 }
+
+function errorText(answer) {
+  const b = answer.body || {};
+  if (answer.status === 409) return `Busy: ${b.detail || "something else is running"}. Wait for it to finish.`;
+  return b.detail || b.error || `HTTP ${answer.status}`;
+}
+
+// ---- trace rendering -------------------------------------------------------------------------------------------
 
 function rowClass(step) {
   if (step.blocked_by === "xc") return "xc";
-  if (step.blocked_by || step.status === null || (step.status >= 400) || step.is_error) return "amber";
+  if (step.blocked_by || step.status === null || step.status === undefined || step.status >= 400 || step.is_error) {
+    return "amber";
+  }
   return "ok";
 }
 
+function pathOf(url) {
+  try { const u = new URL(url); return u.pathname + u.search; } catch (e) { return url || ""; }
+}
+
 function stepLabel(step) {
-  if (step.kind === "front_door") return `front door #${step.attempt}`;
-  if (step.kind === "tool") return step.tool + (step.mcp_name_header ? ` (header: ${step.mcp_name_header})` : "");
-  if (step.kind === "token") return `token ${step.identity ? "→ " + (step.identity.aud || "") : ""}`;
+  if (step.kind === "front_door") return `front door, attempt ${step.attempt}`;
+  if (step.kind === "tool") return step.tool + (step.mcp_name_header ? ` (header says ${step.mcp_name_header})` : "");
+  if (step.kind === "token") return `token → ${step.identity ? step.identity.aud : pathOf(step.target)}`;
+  if (step.kind === "http") return `${step.method || ""} ${pathOf(step.target)}`.trim();
   return step.kind;
+}
+
+// A tool row shows the one thing its beat is about, so it fits on the line; the full result is on hover.
+// S2: the card number the ERP sent (masked by Data Guard in the tenant). S3b: the refund. S4: which store, how many.
+const KEY_FIELDS = [
+  [["payment", "card_number"]],
+  [["refund_id"], ["amount"]],
+  [["store_id"], ["qty"]],
+  [["status"], ["eta"]],
+];
+
+function fieldAt(value, path) {
+  let v = value;
+  for (const key of path) v = v && typeof v === "object" ? v[key] : undefined;
+  return v !== undefined && v !== null && typeof v !== "object" ? v : undefined;
+}
+
+function toolSummary(text) {
+  let value;
+  try { value = JSON.parse(text); } catch (e) { return text; }
+  if (!value || typeof value !== "object") return text;
+  for (const group of KEY_FIELDS) {  // the first group that is present wins
+    const parts = group.map((path) => [path[path.length - 1], fieldAt(value, path)]).filter(([, v]) => v !== undefined);
+    if (parts.length) return parts.map(([k, v]) => `${k}: ${v}`).join(" · ");
+  }
+  return text;
 }
 
 function stepDetail(step) {
@@ -140,36 +210,93 @@ function stepDetail(step) {
     if (!id.agent_id) return `${id.sub || ""} (${id.aud || ""})`;
     return `${id.agent_id} (${id.agent_role}) for ${id.obo_sub} (${id.obo_role})`;
   }
-  return (step.result_preview || "").slice(0, 160);
+  if (step.kind === "tool") return toolSummary(step.result_preview || "");
+  return step.result_preview || "";
 }
 
-function showTrace(result) {
+function whoDecided(step) {
+  if (step.kind === "front_door") return el("span", { class: "tag" }, "user");
+  if (step.scripted) return el("span", { class: "tag", title: "the scenario script ran this step" }, "script");
+  if (step.kind === "token") return el("span", { class: "tag", title: "the agent's own token exchange" }, "agent");
+  return el("span", { class: "tag model", title: "the model chose this step" }, "model");
+}
+
+// Consecutive steps of one plan repeat (same kind and path, e.g. S6's 50 page reads) become one summary row with a
+// count per status. S4 is not collapsed: its 40 stock writes ARE the beat. Tool steps are never collapsed.
+function groupedRows(trace) {
+  const rows = [];
+  for (const step of trace) {
+    const last = rows[rows.length - 1];
+    const key = step.kind === "http" ? `http ${pathOf(step.target).split("?")[0]}` : null;
+    if (key && last && last.key === key) { last.steps.push(step); continue; }
+    rows.push({ key, steps: [step] });
+  }
+  return rows;
+}
+
+function stepRow(step, index) {
+  const cls = rowClass(step);
+  return el("tr", { class: cls },
+    el("td", { class: "num" }, String(step.n ?? step.attempt ?? index + 1)),
+    el("td", {}, whoDecided(step)),
+    el("td", { class: "step", title: stepLabel(step) }, stepLabel(step)),
+    el("td", { class: "num status" }, step.status === null || step.status === undefined ? "none" : String(step.status)),
+    el("td", { class: "by" }, step.blocked_by || ""),
+    el("td", { class: "num" }, String(step.latency_ms ?? "")),
+    el("td", { class: keyField(step) ? "detail key" : "detail", title: step.result_preview || stepDetail(step) },
+      stepDetail(step)));
+}
+
+function keyField(step) {
+  return step.kind === "tool" && !step.reason && !step.is_error && toolSummary(step.result_preview || "") !==
+    (step.result_preview || "");
+}
+
+function summaryRow(group) {
+  const steps = group.steps;
+  const counts = {};
+  for (const s of steps) counts[s.status ?? "none"] = (counts[s.status ?? "none"] || 0) + 1;
+  const blocked = steps.filter((s) => s.blocked_by === "xc").length;
+  const worst = blocked ? "xc" : steps.some((s) => rowClass(s) === "amber") ? "amber" : "ok";
+  const summary = Object.entries(counts).map(([status, n]) => `${n} × ${status}`).join(", ");
+  return el("tr", { class: worst },
+    el("td", { class: "num" }, `${steps[0].n}–${steps[steps.length - 1].n}`),
+    el("td", {}, whoDecided(steps[0])),
+    el("td", { class: "step" }, `${steps.length} × ${stepLabel(steps[0]).split("?")[0]}`),
+    el("td", { class: "num status" }, summary.split(",")[0]),
+    el("td", { class: "by" }, blocked ? "xc" : ""),
+    el("td", { class: "num" }, ""),
+    el("td", { class: "detail", title: summary }, summary));
+}
+
+function clearTrace(message) {
+  $("verdict").replaceChildren();
+  $("problem").replaceChildren();
+  $("acts").replaceChildren();
+  $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7, class: "small" }, message || "")));
+}
+
+function showTrace(result, actsFor) {
   const body = $("trace");
   body.replaceChildren();
   const trace = result.trace || [];
   if (!trace.length) body.append(el("tr", {}, el("td", { colspan: 7, class: "small" }, result.error || "No steps.")));
-  trace.forEach((step, index) => {
-    body.append(el("tr", { class: rowClass(step) },
-      el("td", { class: "num" }, String(step.n ?? index + 1)),
-      el("td", { class: "num" }, step.i === null || step.i === undefined ? "" : String(step.i)),
-      el("td", {}, stepLabel(step)),
-      el("td", { class: "num status" }, step.status === null ? "none" : String(step.status)),
-      el("td", { class: "by" }, step.blocked_by || ""),
-      el("td", { class: "num" }, String(step.latency_ms ?? "")),
-      el("td", { class: "detail" }, stepDetail(step))));
-  });
+  groupedRows(trace).forEach((group, index) =>
+    body.append(group.steps.length > 1 ? summaryRow(group) : stepRow(group.steps[0], index)));
   const verdict = result.verdict;
   $("verdict").replaceChildren(verdict ? el("span", { class: "verdict " + (verdict === "no expectations" ? "none" : verdict) },
     verdict === "no expectations" ? "no local expectations" : verdict.toUpperCase()) : "");
+  $("acts").replaceChildren(...(actsFor ? [el("b", {}, "Acting: "), actsFor] : []));
+  // Why it failed, at the top where the presenter is looking, not under 54 rows.
   const failed = (result.checks || []).filter((c) => !c.ok);
-  $("checks").replaceChildren(...(result.error ? [el("div", {}, result.error)] : []),
-    ...failed.map((c) => el("div", {}, `✗ ${c.description}: ${c.detail}`)));
+  const problems = [...(result.error ? [result.error] : []), ...failed.map((c) => `${c.description}: ${c.detail}`)];
+  $("problem").replaceChildren(...problems.map((text) => el("div", { class: "msg error" }, text)));
+  // Bring the first blocked step into view (S4's first 429, S1's 403).
+  const first = body.querySelector("tr.xc, tr.amber");
+  if (first) first.scrollIntoView({ block: "nearest" });
 }
 
-function shortTitle(title) {
-  // "On-behalf-of: right agent, wrong human (a) then right human (b)" -> "On-behalf-of"; full title is the tooltip.
-  return title.split(/[:(]/)[0].trim();
-}
+// ---- actions ----------------------------------------------------------------------------------------------------
 
 function addMessage(kind, text) {
   $("chat").append(el("div", { class: "msg " + kind }, text));
@@ -179,94 +306,129 @@ function addMessage(kind, text) {
 function setBusy(on, label) {
   busy = on;
   document.querySelectorAll("button").forEach((b) => (b.disabled = on));
-  if (on) $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7 }, el("span", { class: "spin" }), " " + label)));
+  if (on) {
+    clearTrace();
+    $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7 }, el("span", { class: "spin" }), " " + label)));
+  }
+}
+
+function shortTitle(title) {
+  // "On-behalf-of: right agent, wrong human (a) then right human (b)" -> "On-behalf-of"; full title is the tooltip.
+  return title.split(/[:(]/)[0].trim();
+}
+
+function personaOptions() {
+  return state.personas.map((p) => el("option", { value: p.sub }, `${p.name} (${p.role}) → ${p.agent} agent`));
+}
+
+function personaLabel(scenario) {
+  const p = state.personas.find((x) => x.sub === scenario.persona);
+  return p ? `${p.name} (${p.role})` : scenario.persona.replace(/^(partner|job):/, "");
 }
 
 async function runScenario(scenario) {
   if (busy) return;
   const persona = state.personas.find((p) => p.sub === scenario.persona);
+  // The picker shows who this scenario runs as; a partner or a job is not a persona, so it says so instead.
   if (persona) $("persona").value = persona.sub;
+  else $("persona").replaceChildren(...personaOptions(), el("option", { value: "", selected: "" }, personaLabel(scenario)));
   $("title").textContent = `${scenario.id}: ${scenario.title}`;
-  addMessage("user", `${scenario.persona}: ${scenario.message}` +
+  addMessage("user", `${personaLabel(scenario)}: ${scenario.message}` +
     (scenario.repeat_message ? `  (×${scenario.repeat_message})` : ""));
   setBusy(true, `running ${scenario.id}…`);
-  try {
-    const result = await api(`/api/scenarios/${encodeURIComponent(scenario.id)}/run`, { method: "POST" });
-    showTrace(result);
-    if (result.reply) addMessage("agent", result.reply);
-    else if (result.error) addMessage("error", result.error);
-  } catch (e) {
-    showTrace({ trace: [], error: "cockpit backend unreachable: " + e });
-  } finally {
-    setBusy(false);
-    refreshEstate();
+  const answer = await api(`/api/scenarios/${encodeURIComponent(scenario.id)}/run`, { method: "POST" });
+  setBusy(false);
+  if (answer.ok) {
+    showTrace(answer.body, scenario.acts_for);
+    if (answer.body.reply) addMessage("agent", answer.body.reply);
+    else if (answer.body.error) addMessage("error", answer.body.error);
+  } else {
+    showTrace({ trace: [], error: errorText(answer) }, scenario.acts_for);
+    addMessage("error", errorText(answer));
   }
+  refreshEstate();
 }
 
 async function sendChat() {
   const text = $("input").value.trim();
   if (!text || busy) return;
   const sub = $("persona").value;
+  if (!sub) { addMessage("error", "Pick a persona to chat as."); return; }
   addMessage("user", `${sub}: ${text}`);
   $("input").value = "";
   $("title").textContent = `free chat as ${sub} (not a scenario)`;
   setBusy(true, "waiting for the agent…");
-  try {
-    const result = await api("/api/chat", { method: "POST",
-      body: JSON.stringify({ sub, messages: [{ role: "user", content: text }] }) });
-    showTrace(result);
-    addMessage(result.reply ? "agent" : "error", result.reply || result.error || "no reply");
-  } finally {
-    setBusy(false);
-    refreshEstate();
+  const answer = await api("/api/chat", { method: "POST",
+    body: JSON.stringify({ sub, messages: [{ role: "user", content: text }] }) });
+  setBusy(false);
+  const result = answer.ok ? answer.body : { trace: [], error: errorText(answer) };
+  showTrace(result);
+  addMessage(result.reply ? "agent" : "error", result.reply || result.error || "no reply");
+  refreshEstate();
+}
+
+async function resetDemo() {
+  if (busy) return;
+  setBusy(true, "resetting…");
+  const answer = await api("/api/reset", { method: "POST" });
+  setBusy(false);
+  $("chat").replaceChildren();
+  $("title").textContent = "";
+  if (answer.ok) {
+    const r = answer.body;
+    const failed = [!r.erp && "ERP", !r.ai_gateway && "AI gateway"].filter(Boolean);
+    clearTrace(failed.length ? "" : `Reset: ERP ok, AI gateway ok, new run salt ${r.run_salt}.`);
+    if (failed.length) $("problem").replaceChildren(el("div", { class: "msg error" }, `Reset FAILED for ${failed.join(" and ")}.`));
+  } else {
+    clearTrace();
+    $("problem").replaceChildren(el("div", { class: "msg error" }, "Reset FAILED: " + errorText(answer)));
   }
+  refreshEstate();
 }
 
 async function refreshEstate() {
-  try {
-    const estate = await api("/api/estate");
-    const erp = estate.erp;
-    $("refunds").textContent = erp ? erp.refunds_issued : "–";
-    $("stock").textContent = erp ? erp.stock_writes : "–";
-    $("writes").replaceChildren(...(erp ? erp.last_writes.slice(0, 6).map((w) =>
-      el("div", {}, `${w.ts.slice(11, 19)} ${w.kind} ${w.detail.order_id || w.detail.store_id || ""}`)) : ["–"]));
-    const usage = estate.ai_gateway;
-    $("usage").replaceChildren(...(usage ? [el("div", {}, `mode ${usage.mode}, ${usage.calls} calls`),
-      ...Object.entries(usage.by_agent).map(([agent, row]) => el("div", {}, `${agent}: ${row.total} tokens`))] : ["–"]));
-    $("meta").textContent = `env ${state ? state.env : "?"} · run salt ${estate.run_salt}`;
-  } catch (e) { /* the next poll will try again */ }
+  const answer = await api("/api/estate");
+  if (!answer.ok) { $("meta").textContent = "estate unavailable"; return; }
+  const estate = answer.body;
+  const erp = estate.erp;
+  $("refunds").textContent = erp ? erp.refunds_issued : "–";
+  $("stock").textContent = erp ? erp.stock_writes : "–";
+  $("writes").replaceChildren(...(erp ? erp.last_writes.slice(0, 6).map((w) =>
+    el("div", {}, `${w.ts.slice(11, 19)} ${w.kind} ${w.detail.order_id || w.detail.store_id || w.detail.sku || ""}`))
+    : ["ERP admin not reachable"]));
+  const usage = estate.ai_gateway;
+  $("usage").replaceChildren(...(usage ? [el("div", {}, `mode ${usage.mode}, ${usage.calls} calls`),
+    ...Object.entries(usage.by_agent).map(([agent, row]) => el("div", {}, `${agent}: ${row.total} tokens`))]
+    : ["AI gateway admin not reachable"]));
+  const running = estate.running ? ` · running ${estate.running.what} (${estate.running.seconds} s)` : "";
+  $("meta").textContent = `env ${state ? state.env : "?"} · run salt ${estate.run_salt}${running}`;
 }
 
 async function init() {
-  state = await api("/api/state");
-  $("persona").replaceChildren(...state.personas.map((p) =>
-    el("option", { value: p.sub }, `${p.name} (${p.role}) → ${p.agent} agent`)));
+  const answer = await api("/api/state");
+  if (!answer.ok) {
+    $("meta").textContent = "cockpit backend unavailable: " + errorText(answer);
+    return;
+  }
+  state = answer.body;
+  $("persona").replaceChildren(...personaOptions());
   $("scenarios").replaceChildren(...state.scenarios.map((s) => {
     // The persona makes look-alike variants (S3a / S3b) distinct on the button itself.
-    const who = s.persona.replace(/^partner:/, "").replace(/^job:/, "");
+    const who = s.persona.replace(/^(partner|job):/, "");
     const button = el("button", { class: "scenario", title: `${s.title}\n\n${s.message}`, onclick: () => runScenario(s) },
-      el("b", {}, s.id), `${shortTitle(s.title)} `, el("span", { class: "small" }, `· ${who}`));
+      el("b", {}, s.id), `${shortTitle(s.title)} `, el("span", { class: "who" }, who));
     if (!s.console_link) return button;
     return el("span", {}, button, " ", el("a", { href: s.console_link, target: "_blank", rel: "noopener" }, "XC"));
   }));
   $("send").onclick = sendChat;
-  $("reset").onclick = async () => {
-    if (busy) return;
-    setBusy(true, "resetting…");
-    try {
-      const r = await api("/api/reset", { method: "POST" });
-      $("trace").replaceChildren(el("tr", {}, el("td", { colspan: 7, class: "small" },
-        `Reset: ERP ${r.erp ? "ok" : "FAILED"}, AI gateway ${r.ai_gateway ? "ok" : "FAILED"}, new salt ${r.run_salt}`)));
-      $("verdict").replaceChildren();
-      $("checks").replaceChildren();
-    } finally { setBusy(false); refreshEstate(); }
-  };
+  $("reset").onclick = resetDemo;
   refreshEstate();
   setInterval(refreshEstate, 2000);
-  // ?run=S3a runs one scenario on load: a deep link for rehearsals (and for screenshots of a real trace).
+  // ?run=S3a runs one scenario once, then drops itself from the address bar, so a reload never runs it again.
   const wanted = new URLSearchParams(location.search).get("run");
+  if (wanted) history.replaceState(null, "", location.pathname);
   const scenario = wanted && state.scenarios.find((s) => s.id === wanted);
-  if (scenario) runScenario(scenario);
+  if (scenario && !state.running) runScenario(scenario);
 }
 init();
 </script>

@@ -7,51 +7,14 @@ from pathlib import Path
 
 import pytest
 from cockpit.app import create_app
-from cockpit.settings import Settings
 from copperline_common.demo_driver import Endpoints
 from fastapi.testclient import TestClient
 
 REPO = Path(__file__).resolve().parents[4]
-LOCAL = Endpoints(
-    name="local",
-    front_doors={"shop-lb": "http://127.0.0.1:8001", "ops-lb": "http://127.0.0.1:8002",
-                 "partner-lb": "http://127.0.0.1:8003"},
-    tools_base_url="http://127.0.0.1:8011", llm_base_url="http://127.0.0.1:8012", idp_base_url="http://127.0.0.1:8013",
-    erp_admin_url="http://127.0.0.1:8181", aigw_admin_url="http://127.0.0.1:8190",
-    plan_env={"PARTNER_BASE_URL": "http://127.0.0.1:8003"})
-
-
-def batch_job_in_process(stack):
-    """S5 without docker: run the real batch mode in this process against the stack, return its TRACE output."""
-    import asyncio
-    import contextlib
-    import io
-    import os
-
-    from agent_runtime.batch import run_batch
-    from agent_runtime.settings import AgentConfig
-    from agent_runtime.settings import Settings as AgentSettings
-
-    def run_job(name: str) -> tuple[int, str, str]:
-        settings = AgentSettings(agent=AgentConfig.load(REPO / f"config/agents/{name}.yaml"), client_secret=None,
-                                 tools_base_url="http://tools.agentic-demo", llm_base_url="http://llm.agentic-demo",
-                                 idp_base_url="http://idp.agentic-demo", config_dir=REPO / "config",
-                                 scenarios_dir=REPO / "scenarios", mode="batch")
-        out = io.StringIO()
-        os.environ["EXFIL_TEST_URL"] = "https://exfil.invalid/rows"
-        with contextlib.redirect_stdout(out):
-            code = asyncio.run(run_batch(settings, http=stack.http))
-        return code, out.getvalue(), ""
-    return run_job
-
-
 @pytest.fixture
-def cockpit(stack, local_ports):
-    endpoints = Endpoints(**{**LOCAL.__dict__, "secrets": local_ports})
-    settings = Settings(env="local", endpoints=endpoints, scenarios_dir=REPO / "scenarios",
-                        personas_path=REPO / "config/personas.yaml", run_salt="t1",
-                        console_links={"S1": "https://console.example/s1"})
-    with TestClient(create_app(settings, job_runner=batch_job_in_process(stack))) as client:
+def cockpit(cockpit_settings, in_process_job):
+    settings = cockpit_settings(run_salt="t1", console_links={"S1": "https://console.example/s1"})
+    with TestClient(create_app(settings, job_runner=in_process_job)) as client:
         yield client
 
 
@@ -115,19 +78,17 @@ def test_the_page_is_served_and_has_no_external_dependencies(cockpit):
     assert "#e4002b" in page.text.lower()  # the deck's F5 red for XC blocks
 
 
-def test_a_scenario_against_a_stack_that_is_down_is_an_error_not_a_crash(stack, local_ports):
-    """Endpoints that point nowhere: every button answers with an ERROR verdict and the reason."""
-    nowhere = Endpoints(name="local", front_doors={"shop-lb": "http://127.0.0.1:9", "ops-lb": "http://127.0.0.1:9",
-                                                   "partner-lb": "http://127.0.0.1:9"})
-    settings = Settings(env="local", endpoints=nowhere, scenarios_dir=REPO / "scenarios",
-                        personas_path=REPO / "config/personas.yaml")
-    with TestClient(create_app(settings, job_runner=None)) as client:
+def test_a_scenario_against_a_stack_that_is_down_is_an_error_not_a_crash(cockpit_settings, stack):
+    """The stack's front door and ERP admin really refuse connections (as stopped containers do): the button answers
+    with an ERROR verdict that says the hop is unreachable, and the estate panel shows the ERP as missing."""
+    del stack.mesh.apps["shop-lb"], stack.mesh.apps["erp-mock-admin"]
+    with TestClient(create_app(cockpit_settings())) as client:
         result = client.post("/api/scenarios/S0/run").json()
-        assert result["verdict"] == "error" and result["error"]
+        assert result["verdict"] == "error" and result["error"].startswith("unreachable"), result["error"]
         assert client.get("/api/estate").json()["erp"] is None
 
 
-def test_a_container_running_another_plan_is_an_error_on_screen_too(stack, local_ports, monkeypatch):
+def test_a_container_running_another_plan_is_an_error_on_screen_too(cockpit_settings, monkeypatch):
     """Judged like the runner: a stale image after a plan edit must never show as a green PASS to the presenter."""
     from copperline_common import demo_driver
 
@@ -141,15 +102,12 @@ def test_a_container_running_another_plan_is_an_error_on_screen_too(stack, local
         return outcome
 
     monkeypatch.setattr(demo_driver, "run_one", stale)
-    endpoints = Endpoints(**{**LOCAL.__dict__, "secrets": local_ports})
-    settings = Settings(env="local", endpoints=endpoints, scenarios_dir=REPO / "scenarios",
-                        personas_path=REPO / "config/personas.yaml")
-    with TestClient(create_app(settings)) as client:
+    with TestClient(create_app(cockpit_settings())) as client:
         result = client.post("/api/scenarios/S3b/run").json()
     assert result["verdict"] == "error" and "make local-up" in result["error"]
 
 
-def test_the_estate_panel_answers_while_a_scenario_is_running(stack, local_ports):
+def test_the_estate_panel_answers_while_a_scenario_is_running(cockpit_settings):
     """The page polls every 2 s; a 60 s scenario must not freeze the counters on screen."""
     import threading
 
@@ -160,10 +118,7 @@ def test_the_estate_panel_answers_while_a_scenario_is_running(stack, local_ports
         release.wait(10)
         return 0, "", ""
 
-    endpoints = Endpoints(**{**LOCAL.__dict__, "secrets": local_ports})
-    settings = Settings(env="local", endpoints=endpoints, scenarios_dir=REPO / "scenarios",
-                        personas_path=REPO / "config/personas.yaml")
-    with TestClient(create_app(settings, job_runner=slow_job)) as client:
+    with TestClient(create_app(cockpit_settings(), job_runner=slow_job)) as client:
         runner = threading.Thread(target=lambda: client.post("/api/scenarios/S5/run"))
         runner.start()
         assert started.wait(10)
@@ -176,3 +131,100 @@ def test_the_estate_panel_answers_while_a_scenario_is_running(stack, local_ports
         runner.join(10)
         poller.join(10)
     assert answered_during_run, "the estate poll waited for the running scenario"
+
+
+
+# ---- step-10 review: one thing at a time, chat input, reload, settings ---------------------------------------------
+
+
+def test_a_second_click_while_a_run_is_busy_is_refused_not_queued(cockpit_settings):
+    """A queued click would still run after the presenter moved on (a second refund, a late reset)."""
+    import threading
+
+    started, release, calls = threading.Event(), threading.Event(), []
+
+    def slow_job(name):
+        calls.append(name)
+        started.set()
+        release.wait(10)
+        return 0, "", ""
+
+    with TestClient(create_app(cockpit_settings(), job_runner=slow_job)) as client:
+        first = threading.Thread(target=lambda: client.post("/api/scenarios/S5/run"))
+        first.start()
+        assert started.wait(10)
+        again = client.post("/api/scenarios/S5/run")
+        reset = client.post("/api/reset")
+        state = client.get("/api/state").json()
+        release.set()
+        first.join(10)
+    assert again.status_code == 409 and again.json()["running"]["what"] == "S5"
+    assert reset.status_code == 409
+    assert state["running"]["what"] == "S5"  # a reloaded page can show what is running
+    assert calls == ["insights-nightly"]  # the job ran once: the refused click never ran later
+
+
+@pytest.mark.parametrize("body", [b"[1]", b'"text"', b"{", b"", b'{"sub": "alex.rivera", "messages": [1]}',
+                                  b'{"sub": "alex.rivera", "messages": [{"role": "user", "content": "hi"}], '
+                                  b'"scenario_hint": 5}'])
+def test_bad_chat_bodies_are_400_not_500(cockpit, body):
+    response = cockpit.post("/api/chat", content=body, headers={"content-type": "application/json"})
+    assert response.status_code == 400 and response.json()["error"] == "bad_request"
+
+
+def test_scenario_edits_reach_the_buttons_without_a_restart(cockpit_settings, tmp_path):
+    import os
+    import shutil
+
+    scenarios = tmp_path / "scenarios"
+    shutil.copytree(REPO / "scenarios", scenarios)
+    with TestClient(create_app(cockpit_settings(scenarios_dir=scenarios))) as client:
+        before = next(s for s in client.get("/api/state").json()["scenarios"] if s["id"] == "S0")["message"]
+        path = scenarios / "S0-baseline.yaml"
+        path.write_text(path.read_text().replace(before, "Edited message for CO-1042"))
+        os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 10**9))
+        after = next(s for s in client.get("/api/state").json()["scenarios"] if s["id"] == "S0")["message"]
+    assert after == "Edited message for CO-1042"
+
+
+def test_the_cockpit_refuses_to_start_with_no_scenarios(cockpit_settings, tmp_path):
+    with pytest.raises(RuntimeError, match="no scenarios"):
+        create_app(cockpit_settings(scenarios_dir=tmp_path))
+
+
+def test_the_acting_line_names_the_human_and_role_for_every_agent_scenario(cockpit):
+    acts = {s["id"]: s["acts_for"] for s in cockpit.get("/api/state").json()["scenarios"]}
+    assert acts["S3a"] == "refunds agent, acting for sam.patel (care_agent)"
+    assert acts["S3b"] == "refunds agent, acting for morgan.chen (care_supervisor)"
+    assert "no human behind it" in acts["S5"] and "third-party" in acts["S6"]
+
+
+def test_the_runner_and_the_cockpit_judge_a_stale_s5_alike(cockpit_settings, monkeypatch):
+    """S5's plan has ${EXFIL_TEST_URL}; both must still run the stale-plan check on it (the review found the runner
+    silently skipped it)."""
+    import sys
+
+    from copperline_common import demo_driver
+    from copperline_common.scenarios import by_id, load_scenarios
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    import run_scenario
+
+    monkeypatch.delenv("EXFIL_TEST_URL", raising=False)
+    s5 = by_id(load_scenarios(REPO / "scenarios"), "S5")
+    stale = {"trace": [{"i": 0, "kind": "token", "scripted": True, "status": 200, "blocked_by": None},
+                       {"i": 1, "kind": "token", "scripted": True, "status": 200, "blocked_by": None},
+                       {"i": 2, "kind": "tool", "tool": "orders.get_order_status", "scripted": True, "status": 403,
+                        "blocked_by": "xc"}]}
+    # The runner end to end through main() (only run_one stubbed), so its own choice of judge env is what is tested.
+    monkeypatch.setattr(run_scenario, "run_one", lambda scenario, env, personas, run_salt: dict(stale))
+    monkeypatch.setattr(run_scenario, "write_results", lambda *args: None)
+    runner = {"verdict": "error" if run_scenario.main(["S5", "--env", "local"]) == 1 else "pass"}
+    cockpit = demo_driver.judge(s5, "local", dict(stale), demo_driver.judge_env(cockpit_settings().endpoints))
+    assert runner["verdict"] == cockpit["verdict"] == "error"
+
+
+def test_endpoints_never_print_their_secrets(local_ports):
+
+    endpoints = Endpoints(name="local", front_doors={}, secrets={"GRANITE_SUPPLY_SECRET": "do-not-print-me"})
+    assert "do-not-print-me" not in repr(endpoints) and "do-not-print-me" not in str(endpoints)
