@@ -8,20 +8,13 @@ Date: 2026-10-23. Built and checked on the devbox (EC2 `copperline-devbox`, `dep
 |---|---|
 | `make check` passes | **Pass.** 1672 passed, 36 skipped (Mac); the skips are the live-stack and Chrome tests, run separately below |
 | `run_scenario.py --all --env local` passes every scenario with an `expect.local` block | **Pass**, three runs in a row (`RUNS=3 make local-scenarios`, stub model, tightened S0): 27/27 passed, `results/scenarios-20261023T185959Z.json` on the devbox. S7 has no local expectations (WAF and malicious-user detection are XC's) |
-| S0 works against real Bedrock on the devbox | **Blocked: Bedrock model access**, not code. See below |
+| S0 works against real Bedrock on the devbox | **Pass** (2026-10-23, after model access was fixed). `/v1/usage` `"mode": "bedrock"`; S0's model step 200 in 2.8 s; ai-gw logged `model_id: us.anthropic.claude-haiku-5-5`. See below |
 
 Also run on the devbox: `make local-check` (35 live tests against the 18 running containers), `make local-smoke` (every hop answered by the service behind its LB), and every cockpit button through the tunnel.
 
-### S0 against real Bedrock: blocked on model access (docs/08 R24)
+### S0 against real Bedrock (docs/08 R24)
 
-What was done, on 2026-10-23, from the devbox instance role (`copperline-devbox-role`):
-
-1. `aws bedrock list-inference-profiles` lists every current Claude profile as ACTIVE in us-east-1. Planned routes: fast `us.anthropic.claude-haiku-5-5` (shopper), standard `us.anthropic.claude-sonnet-5-5` (refunds, storeops), premium `us.anthropic.claude-opus-5-5` (insights-nightly).
-2. One Converse call per model with ai-gw's exact request (maxTokens 400, one tool) succeeded: a `toolUse` block in about 1 s, no thinking blocks crowding the 400-token cap.
-3. The stack then came up with `LOCAL_STUB_MODEL=false` and those `ROUTE_*` (passed on the command line; there is no `.env` on the devbox). `GET 127.0.0.1:8190/v1/usage` reported `"mode": "bedrock"`.
-4. S0's model step returned **502**: ai-gw logged `bedrock_error AccessDeniedException`, "not authorized to perform the required AWS Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)". From then on every call to those models was denied. Five other models (Haiku 4.5, Sonnet and Opus 4.6, Sonnet and Opus 5) answered their first call and were denied five minutes later.
-
-So each model answers once while Bedrock tries to subscribe the account to it on AWS Marketplace, and that subscription fails because the role may not subscribe. The fix is an account step, not code: an admin completes the model subscriptions once (Bedrock console, Model access), or the calling role gets `aws-marketplace:Subscribe` and `aws-marketplace:ViewSubscriptions` for the first call. The EC2 core role (Phase 0 step 3) needs the same. Then re-run:
+Routes: fast `us.anthropic.claude-haiku-5-5` (shopper), standard `us.anthropic.claude-sonnet-5-5` (refunds, storeops), premium `us.anthropic.claude-opus-5-5` (insights-nightly), us-east-1. The devbox has no `.env`, so the settings go on the command line:
 
 ```bash
 make devbox-run CMD="LOCAL_STUB_MODEL=false ROUTE_FAST=us.anthropic.claude-haiku-5-5 \
@@ -30,9 +23,11 @@ make devbox-run CMD="uv run python scripts/run_scenario.py S0 --env local"
 make devbox-run CMD="make local-up"          # back to stub mode
 ```
 
-S0 must PASS, and ai-gw's `converse` log line must show the real `model_id`.
+Result: S0 PASS with its model step asserted; the reply is a real answer built from the two tool results (order CO-1042 shipped, ETA 20 October, the Alpine 2 reviews). S2 and S3b also pass on Sonnet 5.5. The devbox role reached all three models twice, 150 s apart. S5 passes without reaching Bedrock: its model hop is a 403 at the gateway by design, so no scenario reaches the premium route locally (a direct Converse call to Opus 5.5 does work).
 
-**This run found a hole, now fixed.** S0 passed with the 502, because its `expect.local` asserted only step 1. It now asserts all three steps like `expect.tenant`, so a failed model hop fails S0 (`scenarios/S0-baseline.yaml`; `test_real_s0_block_fails_when_the_model_hop_fails` fails without the change). This is a tightening; no expect block was loosened.
+**Model access took a detour.** The first run failed: S0's model step was a 502, ai-gw logged `AccessDeniedException` ("not authorized to perform the required AWS Marketplace actions"). A model's first call in an account starts its AWS Marketplace subscription. Those first calls came from the devbox role, which has no `aws-marketplace:Subscribe`, so each model answered once and was then denied for everyone. Fix: a call to each model from the SSO `Users` role, which may subscribe, then about 5 minutes for the failed state to clear. Now `aws bedrock get-foundation-model-availability` shows `agreementAvailability: AVAILABLE` for all three. The subscription is per account, so the devbox and EC2 core roles need only `bedrock:InvokeModel`. docs/07 Phase 0 now says to make a new model's first call from the SSO role. (Updating the Mac's AWS CLI from 2.22 to 2.38 was needed for the Bedrock availability commands.)
+
+**The failed run found a hole, now fixed.** S0 passed with the 502, because its `expect.local` asserted only step 1. It now asserts all three steps like `expect.tenant`, so a failed model hop fails S0 (`scenarios/S0-baseline.yaml`; `test_real_s0_block_fails_when_the_model_hop_fails` fails without the change). This is a tightening; no expect block was loosened.
 
 ## What was built
 
@@ -60,10 +55,11 @@ Each step had a review round (reviewers plus adversarial skeptics); confirmed fi
 - **Scenario plans use URL variables** (`${PARTNER_BASE_URL}` and friends), so one plan runs locally and in the tenant.
 - **Internal-LB gateways listen on port 80 locally** (`ip_unprivileged_port_start=0`), so services use tenant URLs unchanged. vK8s workloads still listen on 8080.
 - **Expect blocks tightened, never loosened:** S1, S3a and S5 `expect.local` assert `blocked_by: xc` (agreed at the start of Phase 1), and S0 now asserts its model step (above).
-- **Docs/08 rows R32–R44** were added during Phase 1 for behaviour the code depends on that only the tenant can confirm, and R24 now records the Bedrock finding.
+- **Docs/08 rows R32–R44** were added during Phase 1 for behaviour the code depends on that only the tenant can confirm, and R24 (Bedrock models) is now verified, with how model access works.
 
 ## Open items
 
+- **Real-model replies are cut off at 400 tokens.** On Bedrock, S0's reply (Haiku) and S3b's (Sonnet) hit `max_tokens` and end mid-sentence; S2's (Sonnet, 357 tokens) finished. `MODEL_MAX_TOKENS = 400` in `plan_executor.py` is a documented contract (API.md, docs/03), sized for the stub's short replies. Proposed for Phase 4 (or before any real-model rehearsal): raise the cap (for example 1024) and make the agent prompts ask for a few short sentences, then re-check the budgets in `.env.example` (`BUDGET_TOKENS_*`). Stub mode, the default and the stage fallback, is not affected.
 - `writes.actor` in the ERP is always `mcp-servers`: every ERP call comes through `svc-mcp`. Who caused a write comes from the cockpit trace and XC logs (erp-mock README says so).
 - docs/03 shows no card on file for Mallory (CO-1077) and Pat (CO-1100), but the seed data gives them test cards. Harmless; pick one before the deck is final.
 - The latency bench client (`measure_latency.py`) is Phase 4.
@@ -72,7 +68,6 @@ Each step had a review round (reviewers plus adversarial skeptics); confirmed fi
 ## Decide before Phase 2
 
 - **R40: ai-gw's API key versus plain llm-lb.** ai-gw on EC2 requires `x-api-key`, but Phase 2 runs llm-lb with routing only, and llm-lb header injection comes late in Phase 3: every model call would be a 401. Either add header injection to the plain Phase 2 llm-lb (R10 is doc-confirmed), or run Phase 2 with `GATEWAY_REQUIRE_KEY=false` and flip it before Phase 3.
-- **R24: Bedrock model access** (above), for the devbox role and the EC2 core role.
 
 ## What Phase 2 needs
 
