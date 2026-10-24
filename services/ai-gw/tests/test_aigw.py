@@ -77,6 +77,13 @@ def test_key_check_can_be_off(gw):
     assert call(gateway, key=None).status_code == 200
 
 
+@pytest.mark.parametrize("require_key, status", [(True, 401), (False, 400)])
+def test_a_bare_post_tells_whether_the_key_check_is_on(gw, require_key, status):
+    """docs/07 Phase 3 and preflight (R40) run exactly this on the EC2 host: no key, no route, no body. 401 = on."""
+    gateway, _ = gw(require_key=require_key)
+    assert gateway.post("/v1/converse").status_code == status
+
+
 @pytest.mark.parametrize("route", [None, "bogus", ["fast", "fast"], ["fast", "premium"]])
 def test_route_must_be_exactly_one_known_value(gw, route):
     """A repeated x-model-route is refused (docs/03): llm-lb's policy matched one copy, and we must not use another."""
@@ -584,3 +591,12 @@ def test_ec2_compose_requires_the_key_unless_env_turns_it_off():
     compose = Path(__file__).resolve().parents[3] / "deploy/aws/core/docker-compose.yaml"
     env = yaml.safe_load(compose.read_text())["services"]["copperline-ai-gw"]["environment"]
     assert env["GATEWAY_REQUIRE_KEY"] == "${GATEWAY_REQUIRE_KEY:-true}"
+
+
+def test_env_template_ships_the_key_check_on():
+    """R40's `false` is temporary and goes in EC2's .env only; a .env copied from the template must fail closed."""
+    import re
+    from pathlib import Path
+
+    template = (Path(__file__).resolve().parents[3] / ".env.example").read_text()
+    assert re.findall(r"^GATEWAY_REQUIRE_KEY=(\S*)", template, re.M) == ["true"]

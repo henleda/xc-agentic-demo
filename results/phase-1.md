@@ -6,7 +6,7 @@ Date: 2026-10-23. Built and checked on the devbox (EC2 `copperline-devbox`, `dep
 
 | Check | Result |
 |---|---|
-| `make check` passes | **Pass.** 1672 passed, 36 skipped (Mac); the skips are the live-stack and Chrome tests, run separately below |
+| `make check` passes | **Pass.** 1676 passed, 36 skipped (Mac, after the step-11 review fixes). The skips are the 35 live-stack tests (run on the devbox with `make local-check`, below) and S7's empty `expect.local`. The Chrome page tests run on the Mac and skip on the devbox (no Chrome) |
 | `run_scenario.py --all --env local` passes every scenario with an `expect.local` block | **Pass**, three runs in a row (`RUNS=3 make local-scenarios`, stub model, tightened S0): 27/27 passed, `results/scenarios-20261023T185959Z.json` on the devbox. S7 has no local expectations (WAF and malicious-user detection are XC's) |
 | S0 works against real Bedrock on the devbox | **Pass** (2026-10-23, after model access was fixed). `/v1/usage` `"mode": "bedrock"`; S0's model step 200 in 2.8 s; ai-gw logged `model_id: us.anthropic.claude-haiku-5-5`. See below |
 
@@ -23,7 +23,7 @@ make devbox-run CMD="uv run python scripts/run_scenario.py S0 --env local"
 make devbox-run CMD="make local-up"          # back to stub mode
 ```
 
-Result: S0 PASS with its model step asserted; the reply is a real answer built from the two tool results (order CO-1042 shipped, ETA 20 October, the Alpine 2 reviews). S2 and S3b also pass on Sonnet 5.5. The devbox role reached all three models twice, 150 s apart. S5 passes without reaching Bedrock: its model hop is a 403 at the gateway by design, so no scenario reaches the premium route locally (a direct Converse call to Opus 5.5 does work).
+Result: S0 PASS with its model step asserted; the reply is a real answer built from the two tool results (order CO-1042 shipped, ETA 20 October, the Alpine 2 reviews). S2 and S3b also ran on Sonnet 5.5: ai-gw logged `model_id: us.anthropic.claude-sonnet-5-5`, status 200, `end_turn` for both. That log is the Sonnet evidence: S2's and S3b's expect blocks do not assert the model call (S2's model step and S3's closing call), so their PASS alone would not show it. The devbox role reached all three models twice, 150 s apart. S5 passes without reaching Bedrock: its model hop is a 403 at the gateway by design, so no scenario reaches the premium route locally (a direct Converse call to Opus 5.5 does work).
 
 **Model access took a detour.** The first run failed: S0's model step was a 502, ai-gw logged `AccessDeniedException` ("not authorized to perform the required AWS Marketplace actions"). A model's first call in an account starts its AWS Marketplace subscription. Those first calls came from the devbox role, which has no `aws-marketplace:Subscribe`, so each model answered once and was then denied for everyone. Fix: a call to each model from the SSO `Users` role, which may subscribe, then about 5 minutes for the failed state to clear. Now `aws bedrock get-foundation-model-availability` shows `agreementAvailability: AVAILABLE` for all three. The subscription is per account, so the devbox and EC2 core roles need only `bedrock:InvokeModel`. docs/07 Phase 0 now says to make a new model's first call from the SSO role. (Updating the Mac's AWS CLI from 2.22 to 2.38 was needed for the Bedrock availability commands.)
 
@@ -46,7 +46,7 @@ Result: S0 PASS with its model step asserted; the reply is a real answer built f
 | Scripts | `scripts/` | `gen_keys.py`, `gen_policy.py`, `render_secrets.py`, `gen_seed_data.py`, `run_scenario.py`, `smoke_test.py` (both `--env local`) |
 | Devbox | `deploy/devbox` | EC2 dev box over SSM; `make devbox-run`, `devbox-tunnel`, `devbox-results` |
 
-Each step had a review round (reviewers plus adversarial skeptics); confirmed findings were fixed with tests that fail without the fix. The commit history has one commit per step and per review.
+Each step had a review round (reviewers plus adversarial skeptics); confirmed findings were fixed with tests that fail without the fix. Review fixes are either in the step's own commit (steps 2-4) or in follow-up commits.
 
 ## Deviations from the spec
 
@@ -59,15 +59,15 @@ Each step had a review round (reviewers plus adversarial skeptics); confirmed fi
 
 ## Open items
 
-- **Fixed: real-model replies were cut off at 400 tokens.** On Bedrock, S0's reply (Haiku) and S3b's (Sonnet) hit `max_tokens` and ended mid-sentence (S0: "- **"). The cap was sized for the stub's short replies, and the 5.5 models think before answering, which counts against it. Now `MODEL_MAX_TOKENS = 1024` (API.md updated) and the shopper, refunds and storeops prompts ask for two or three short sentences of plain text. Re-run on Bedrock: S0, S2 and S3b all `end_turn` (434, 274 and 309 output tokens), each reply two or three sentences. S0's 434 shows the cap alone had to rise. Budgets are fine: about 1,250 tokens per call against 200k per route per day. Stub mode is unaffected (9/9 after the change).
+- **Fixed: real-model replies were cut off at 400 tokens.** On Bedrock, S0's reply (Haiku) and S3b's (Sonnet) hit `max_tokens` and ended mid-sentence (S0: "- **"). The cap was sized for the stub's short replies, and the 5.5 models think before answering, which counts against it. Now `MODEL_MAX_TOKENS = 1024` (API.md updated) and the shopper, refunds and storeops prompts ask for two or three short sentences of plain text. Re-run on Bedrock: S0, S2 and S3b all `end_turn` (434, 274 and 309 output tokens), each reply two or three sentences. S0's 434 shows the cap alone had to rise. Budgets are fine: about 1,250 tokens per call against the daily budgets in `.env.example` (200k on fast and standard, 50k on premium, which only insights-nightly uses and S5 blocks). Stub mode is unaffected (9/9 after the change).
 - `writes.actor` in the ERP is always `mcp-servers`: every ERP call comes through `svc-mcp`. Who caused a write comes from the cockpit trace and XC logs (erp-mock README says so).
 - docs/03 shows no card on file for Mallory (CO-1077) and Pat (CO-1100), but the seed data gives them test cards. Harmless; pick one before the deck is final.
 - The latency bench client (`measure_latency.py`) is Phase 4.
-- `scripts/check_bedrock.py` (one Converse call per route from EC2 through the VPC endpoint) is still to build; the probe used here can be its starting point.
+- `scripts/check_bedrock.py` (Phase 0 acceptance: Converse per route from EC2 through the VPC endpoint) is still to build. The R24 detour shows what it should check: each route's `agreementAvailability` is `AVAILABLE`, and a call with ai-gw's request shape (maxTokens, one tool) returns a `toolUse`, done twice a few minutes apart, since a model whose subscription failed answers its first call. The step-11 probe was a throwaway and is not committed.
 
 ## Decided before Phase 2
 
-- **R40: ai-gw's API key versus plain llm-lb.** ai-gw on EC2 requires `x-api-key`, but Phase 2 runs llm-lb with routing only, and llm-lb header injection is the second-to-last Phase 3 step: every model call would be a 401. Decided: EC2 runs ai-gw with `GATEWAY_REQUIRE_KEY=false` (a variable in `deploy/aws/core/docker-compose.yaml`, default `true`, pinned by a test) until that Phase 3 step, which turns it on and re-runs S0 (docs/07). `preflight.sh` must call it a no-go while it is off.
+- **R40: ai-gw's API key versus plain llm-lb.** ai-gw on EC2 requires `x-api-key`, but Phase 2 runs llm-lb with routing only, and llm-lb header injection is the second-to-last Phase 3 step: every model call would be a 401. Decided: EC2 runs ai-gw with `GATEWAY_REQUIRE_KEY=false` (a variable in `deploy/aws/core/docker-compose.yaml`, default `true`, pinned by a test) until that Phase 3 step, which turns it on, recreates ai-gw (`docker compose restart` keeps the old environment), confirms a keyless request gets 401, and re-runs S0 (docs/07). `.env.example` ships `true` (pinned by a test); Phase 2 adds `false` to EC2's `.env` only. `preflight.sh` must call it a no-go while it is off.
 
 ## What Phase 2 needs
 
@@ -76,4 +76,5 @@ Each step had a review round (reviewers plus adversarial skeptics); confirmed fi
 - The cockpit's S5 button: create a Job from `cronjob/insights-nightly` through the vK8s API and tail its `TRACE ` lines. Until then the button says it is not built.
 - `run_scenario.py --env tenant` and `smoke_test.py --env tenant` (both exit 2 today).
 - Timeouts on the XC side: shop-lb and ops-lb longer than the longest agent turn (R41), cockpit-lb longer than the longest button (R44), llm-lb longer than ai-gw's 25 s Bedrock read (R39).
-- `scripts/reset_demo.sh` and `scripts/preflight.sh`.
+
+Later (Phase 4, docs/07): `scripts/reset_demo.sh` and `scripts/preflight.sh`. Preflight must be a no-go while EC2 ai-gw runs without its key check (R40; how to detect it: `scripts/README.md`).

@@ -43,6 +43,8 @@ AWS_REGION=us-east-1
 
 `compose.sh` passes only these names (plus `BUDGET_TOKENS_*`) from `.env` to compose, via `local_env.py`. It refuses `LOCAL_STUB_MODEL=false` with no route. **Bedrock mode works on the devbox only**: ai-gw's credentials come from the instance role, and no AWS credentials are ever passed into a container. `curl -s 127.0.0.1:8190/v1/usage` shows `"mode": "stub"` or `"bedrock"`.
 
+The devbox has no `.env`, and a sync deletes one created only on the box, so on the devbox pass the settings on the command line: `make devbox-run CMD="LOCAL_STUB_MODEL=false ROUTE_FAST=us.anthropic.claude-haiku-5-5 ROUTE_STANDARD=us.anthropic.claude-sonnet-5-5 ROUTE_PREMIUM=us.anthropic.claude-opus-5-5 make local-up"`, and `make devbox-run CMD="make local-up"` for stub mode again. Before pointing a route at a model never used in this account, make its first call from the SSO role (docs/08 R24): the devbox role cannot complete the model's Marketplace subscription.
+
 ## local-gateway: what it does, and what it does not
 
 One process plays **one** XC load balancer (`LB_NAME`), from `deploy/xc/intent/20-load-balancers.yaml`, `service-policies.generated.yaml` and `30-security.yaml`. Origin pools map to compose services in `pools.yaml`. Per request, the first failure wins:

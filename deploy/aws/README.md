@@ -13,7 +13,7 @@
 - **EC2** `copperline-core`:
   - t3.large, AL2023, Docker plus compose, in `core`
   - SSM access only (no SSH)
-  - Instance role allows `bedrock:InvokeModel*` and `bedrock:Converse*` on the three route model ARNs only
+  - Instance role allows `bedrock:InvokeModel*` (this also authorizes Converse; there is no `bedrock:Converse` action) on the three route inference profiles `arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.claude-{haiku,sonnet,opus}-5-5` **and** on `arn:aws:bedrock:{us-east-1,us-east-2,us-west-2}::foundation-model/anthropic.claude-{haiku,sonnet,opus}-5-5`, the Regions the profiles route to (`aws bedrock get-inference-profile`). Both are checked on every call (docs/07 Phase 0 step 3; `deploy/devbox/main.tf` is a working, broader policy). No AWS Marketplace permissions: the account's model subscriptions already exist (docs/08 R24)
 - **Security group** `sg-core`: ingress 8081, 8090 and 8095 from `10.50.2.0/24` (CE inside) only.
 - **S3 bucket** `copperline-demo-xc-logs` (optional, for the XC global log receiver).
 

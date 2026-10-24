@@ -8,7 +8,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 
 1. In the F5 AWS account, create VPC `10.50.0.0/16` with subnets: CE outside (public), CE inside (private), and core (private). Add a NAT gateway for the `core` subnet (the cockpit on EC2 needs outbound internet to reach the public XC LBs and the vK8s API, and the host pulls images). The CE outside subnet uses the internet gateway.
 2. Create the `bedrock-runtime` interface VPC endpoint in the core subnet. Enable model access in Bedrock for the three route models (`fast`, `standard`, `premium`). Use inference profile IDs where the region requires them. Model access means the account's AWS Marketplace subscription to each model, started by the model's first call. Make that first call from a role with `aws-marketplace:Subscribe` (the SSO `Users` role), never from a service role: a caller without it gets one answer, then `AccessDeniedException` for everyone (docs/08 R24). The three route models are already subscribed in this account.
-3. Create EC2 `copperline-core` (t3.large, Amazon Linux 2023, Docker). Give it an instance role with `bedrock:InvokeModel` and `bedrock:Converse` on the three model ARNs only. Its security group allows 8081, 8090 and 8095 from the CE inside subnet only.
+3. Create EC2 `copperline-core` (t3.large, Amazon Linux 2023, Docker). Give it an instance role with `bedrock:InvokeModel` (Converse is authorized by it; there is no `bedrock:Converse` action) on the three route inference profiles (`arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.claude-*-5-5`) **and** their foundation models in every Region the profiles route to: us-east-1, us-east-2, us-west-2 (`aws bedrock get-inference-profile` lists them). A `us.` profile call is checked against both; with only one, every call is `AccessDeniedException`. `deploy/devbox/main.tf` has a working policy. Its security group allows 8081, 8090 and 8095 from the CE inside subnet only.
 4. In XC:
    1. Create the namespace `agentic-demo`.
    2. Create the AWS cloud credential.
@@ -44,7 +44,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 
 1. Build multi-arch images. Verify they run as an arbitrary UID: `docker run --user 1000770000:0`. Push them.
 2. Apply `deploy/vk8s/*.yaml`, with secrets rendered.
-3. Run compose on EC2 `copperline-core` (`deploy/aws/core/docker-compose.yaml`), with `GATEWAY_REQUIRE_KEY=false` in its `.env`: the plain llm-lb does not add ai-gw's `x-api-key` yet, so with the check on every model call would be a 401 (docs/08 R40).
+3. Run compose on EC2 `copperline-core` (`deploy/aws/core/docker-compose.yaml`), with `GATEWAY_REQUIRE_KEY=false` added to its `.env` (the template ships `true`): the plain llm-lb does not add ai-gw's `x-api-key` yet, so with the check on every model call would be a 401 (docs/08 R40).
 4. Create all origin pools and LBs with **only** routing and advertisement configured. No JWT, policies, WAF or rate limits yet.
 5. Run the advertisement check from `docs/04`.
 
@@ -58,7 +58,12 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 
 Order: JWT validation → user identification → `sp-tools` and `sp-llm` (generated) → `sp-ops`, `sp-idp`, `erp-lb` rules → rate limiters → WAF → Data Guard → API definitions (Report first, then Block) → malicious user detection → llm-lb header injection → vK8s network policy.
 
-At the llm-lb header injection step, set `GATEWAY_REQUIRE_KEY=true` on EC2 (or delete the line from its `.env`), restart ai-gw, and re-run S0: a 401 from ai-gw means the injection is not working (docs/08 R10, R40).
+At the llm-lb header injection step, turn ai-gw's key check back on (docs/08 R10, R40):
+
+1. In EC2's `.env`, check that `GATEWAY_API_KEY` is set and equals the value blindfolded into `aigw-api-key`. With the check on, ai-gw will not start without it.
+2. Set `GATEWAY_REQUIRE_KEY=true` (or delete the line), then **recreate** ai-gw: `docker compose up -d copperline-ai-gw` with the same compose file and `.env` as before. `docker compose restart` keeps the old environment.
+3. Confirm the check is on before testing through XC. On the EC2 host, `curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8090/v1/converse` must print `401` (`400` means the check is still off). ai-gw's `aigw_ready` log line also shows `require_key`.
+4. Re-run S0. A 401 from ai-gw now means llm-lb is not injecting the key.
 
 After each step, re-run the smoke test and every scenario that touches that control. Record the actual XC block response (status code, headers, body) in `docs/08`, and update the XC block detector in `services/common`.
 
