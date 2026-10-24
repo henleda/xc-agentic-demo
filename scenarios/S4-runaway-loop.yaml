@@ -14,6 +14,7 @@ final_reply: "I was only able to update 10 of 40 stores before hitting a rate li
 expect:
   tenant:
     steps:
+      - { i: 0, status: 200, blocked_by: null }                             # the planning model call
       - { i_range: [1, 40], status: 200, count: 10, tolerance: 1 }          # 10 (+/-1) succeed...
       - { i_range: [1, 40], status: 429, blocked_by: xc, min_count: 29 }    # ...the rest are fabric 429s
     estate_delta: { stock_writes: 10 }
@@ -21,4 +22,5 @@ expect:
     xc_log_hint: "tools-lb: rate limiter rl-tools, user=storeops, Mcp-Name=adjust_stock"
   local:
     steps:
+      - { i: 0, status: 200 }
       - { i_range: [1, 10], status: 200 }

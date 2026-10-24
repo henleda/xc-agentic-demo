@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from copperline_common.credentials import secret_env_name
-from copperline_common.expect import evaluate, select_block
+from copperline_common.expect import Check, evaluate, select_block
 from copperline_common.outbound import HttpResult, new_http_client, new_sync_http_client
 from copperline_common.personas import Personas
 from copperline_common.plan_executor import ExecContext, run_plan
@@ -226,6 +226,11 @@ def judge(scenario: Scenario, env_name: str, outcome: dict, plan_env: dict | Non
     """The verdict on one outcome: pass / fail / error / no expectations (rules in scripts/run_scenario.py)."""
     result = evaluate(select_block(scenario.expect, env_name), outcome.get("trace", []),
                       estate_delta=outcome.get("estate_delta"))
+    if not result.skipped:
+        failed_closing = closing_call_problem(outcome.get("trace", []))
+        if failed_closing:
+            result.checks.append(Check(False, "closing reply: the unscripted model call answered 200", failed_closing))
+            result.ok = False
     error = outcome.get("error") or wrong_run(scenario, outcome, plan_env)
     if result.skipped:
         verdict = "no expectations"
@@ -243,6 +248,17 @@ def judge(scenario: Scenario, env_name: str, outcome: dict, plan_env: dict | Non
         "reply": outcome.get("reply"),
         "trace": outcome.get("trace", []),
     }
+
+
+def closing_call_problem(trace: list[dict]) -> str | None:
+    """A failed closing call, or None. When a plan ends on a tool step with no final_reply, the agent asks the model for
+    the reply in one unscripted call (i null). It has no plan index, so no expect block can select it, and no scenario
+    wants it to fail: S3a's escalation advice and S3b's confirmation are that reply (scenarios/README.md)."""
+    for step in trace:
+        if step.get("kind") == "model" and step.get("i") is None and not step.get("scripted") \
+                and step.get("status") != 200:
+            return f"status={step.get('status')} blocked_by={step.get('blocked_by')} reason={step.get('reason')}"
+    return None
 
 
 def wrong_run(scenario: Scenario, outcome: dict, plan_env: dict | None) -> str | None:

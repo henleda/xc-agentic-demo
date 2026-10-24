@@ -42,7 +42,8 @@ def test_a_failed_check_is_a_fail_with_the_failing_check_listed():
 
 
 def test_a_passing_trace_is_a_pass():
-    trace = [{"n": 1, "i": 2, "kind": "tool", "status": 403, "blocked_by": "xc", "is_error": None}]
+    trace = [{"n": 1, "i": 1, "kind": "model", "status": 200, "blocked_by": None},
+             {"n": 2, "i": 2, "kind": "tool", "status": 403, "blocked_by": "xc", "is_error": None}]
     result = run_scenario.check(by_id(SCENARIOS, "S1"), "local", {"trace": trace, "estate_delta": {
         "refunds_issued": 0, "stock_writes": 0}})
     assert result["verdict"] == "pass"

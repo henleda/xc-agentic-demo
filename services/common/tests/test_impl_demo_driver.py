@@ -105,5 +105,32 @@ def test_judge_never_passes_an_error(outcome, verdict):
     assert demo_driver.judge(by_id(SCENARIOS, "S1"), "local", outcome)["verdict"] == verdict
 
 
+def closing_run(status: int, refund_status: int = 403) -> dict:
+    """S3a as the agent traces it: two plan tool steps, then the unscripted closing call (i null)."""
+    return {"matched": "S3a", "estate_delta": {"refunds_issued": 0, "stock_writes": 0}, "trace": [
+        {"i": 0, "kind": "tool", "status": 200, "blocked_by": None, "is_error": False, "scripted": True},
+        {"i": 1, "kind": "tool", "status": refund_status, "blocked_by": "xc", "scripted": True},
+        {"i": None, "kind": "model", "status": status, "blocked_by": None if status == 200 else "server",
+         "scripted": False},
+    ]}
+
+
+@pytest.mark.parametrize("env", ["local", "tenant"])
+def test_a_failed_closing_call_fails_the_scenario(env):
+    """S3a's escalation advice is the closing reply. No expect block can select it (i null), so the judge checks it."""
+    s3a = by_id(SCENARIOS, "S3a")
+    assert demo_driver.judge(s3a, env, closing_run(200))["verdict"] == "pass"
+    result = demo_driver.judge(s3a, env, closing_run(502))
+    assert result["verdict"] == "fail"
+    assert any(not c["ok"] and "closing reply" in c["description"] for c in result["checks"])
+
+
+def test_the_closing_call_rule_ignores_plan_model_steps():
+    """S5's model step is scripted (i=3) and meant to be blocked: the rule is for the closing call only."""
+    trace = [{"i": 3, "kind": "model", "status": 403, "blocked_by": "xc", "scripted": True}]
+    assert demo_driver.closing_call_problem(trace) is None
+    assert demo_driver.closing_call_problem([dict(trace[0], i=None, scripted=False)]) is not None
+
+
 def test_judge_reports_no_expectations_for_s7_locally():
     assert demo_driver.judge(by_id(SCENARIOS, "S7"), "local", {"trace": []})["verdict"] == "no expectations"

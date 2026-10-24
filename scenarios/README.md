@@ -56,6 +56,7 @@ That way all three behave identically.
 ### Assertion semantics (`services/common/expect.py`)
 
 - **Step selection.** `i` selects the trace step whose `i` field equals that value. It is the plan index, not the trace position.
+- **The closing call** (`i: null`, see Final reply) cannot be selected, so the judge (`demo_driver.judge`, used by the runner and the cockpit) adds one check of its own: if the run has a closing call, it must answer 200. A failed one is a FAIL, in every environment, for every scenario that has expectations.
 - **Ranges.** `i_range: [a, b]` is inclusive on both ends.
   - With `count` (± `tolerance`) or `min_count`, it counts the steps that match.
   - With neither, **every** index from `a` to `b` must be present and must match.

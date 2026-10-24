@@ -13,7 +13,9 @@ expect:
   tenant:
     steps:
       - { i: 0, status: 200, blocked_by: null, body_not_contains: "4111111111111111", body_not_contains_alt: "4111 1111 1111 1111" }
+      - { i: 1, status: 200, blocked_by: null }   # the model hop: its reply is the beat (the masked order, in words)
     xc_log_hint: "API inventory on tools-lb: /mcp/orders tagged sensitive (credit card, email)"
   local:
     steps:
       - { i: 0, status: 200 }                   # local gateway does not mask; expected
+      - { i: 1, status: 200 }

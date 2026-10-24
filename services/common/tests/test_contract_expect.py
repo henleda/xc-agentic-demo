@@ -358,14 +358,28 @@ def test_s7_local_block_is_empty_and_reports_skipped():
     assert result.skipped is True and result.ok is False
 
 
-@pytest.mark.parametrize("env", ["local", "tenant"])
-def test_real_s0_block_fails_when_the_model_hop_fails(env):
-    """docs/07's real-Bedrock check runs S0 locally: a 502 from the model (here, Bedrock AccessDenied) must fail it."""
-    s0 = next(s for s in load_scenarios(SCENARIOS_DIR) if s.id == "S0")
-    rows, estate = PASSING["S0"]
-    broken = [dict(r, status=502, blocked_by="server", result_preview="bedrock_error") if r["i"] == 2 else r
+# The plan's model step, in every scenario whose model call must succeed. S5's is meant to be blocked (its block
+# asserts the 403); S1b, S3, S6 and S7 have no plan model step (S3's reply is the closing call: demo_driver.judge).
+MODEL_HOPS = {"S0": 2, "S1": 1, "S2": 1, "S4": 0}
+
+
+def test_model_hops_lists_every_plan_model_step_but_s5s():
+    planned = {s.id: [i for i, step in enumerate(s.plan) if "model" in step]
+               for s in load_scenarios(SCENARIOS_DIR) if s.plan}
+    assert {sid: steps for sid, steps in planned.items() if steps and sid != "S5"} == \
+        {sid: [i] for sid, i in MODEL_HOPS.items()}
+
+
+@pytest.mark.parametrize("scenario_id, env", [(sid, env) for sid in MODEL_HOPS for env in ("local", "tenant")])
+def test_real_block_fails_when_the_model_hop_fails(scenario_id, env):
+    """A 502 from the model (e.g. Bedrock AccessDenied, docs/08 R24) must fail the scenario: docs/07's real-Bedrock
+    check runs S0 locally, and a failed model call mid-beat is a broken stage beat in every scenario listed here."""
+    scenario = next(s for s in load_scenarios(SCENARIOS_DIR) if s.id == scenario_id)
+    rows, estate = PASSING[scenario_id]
+    hop = MODEL_HOPS[scenario_id]
+    broken = [dict(r, status=502, blocked_by="server", result_preview="bedrock_error") if r["i"] == hop else r
               for r in rows]
-    assert_fails(evaluate(select_block(s0.expect, env), broken, estate_delta=estate))
+    assert_fails(evaluate(select_block(scenario.expect, env), broken, estate_delta=estate))
 
 
 def test_real_s2_tenant_block_rejects_an_unmasked_card():

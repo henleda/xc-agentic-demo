@@ -15,10 +15,12 @@ expect:
   tenant:
     steps:
       - { i: 0, status: 200, blocked_by: null }
+      - { i: 1, status: 200, blocked_by: null }   # the model hop: a failed one would put a server error in the beat
       - { i: 2, status: 403, blocked_by: xc }
     estate_delta: { refunds_issued: 0 }
     xc_log_hint: "tools-lb security events: service policy deny, user=shopper, path=/mcp/refunds (obo_sub visible only if R20 verifies; otherwise from cockpit trace)"
   local:
     steps:
+      - { i: 1, status: 200 }
       - { i: 2, status: 403, blocked_by: xc }     # local-gateway stand-in; a server-side 403 would be blocked_by: server
     estate_delta: { refunds_issued: 0 }
