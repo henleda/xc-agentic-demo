@@ -19,6 +19,10 @@ gateway needs one. Apply: `make deploy-aws` (or `terraform apply -var owner=... 
   - Instance role allows `bedrock:InvokeModel*` (this also authorizes Converse; there is no `bedrock:Converse` action) on the three route inference profiles in the deployment Region `arn:aws:bedrock:us-east-2:<account>:inference-profile/us.anthropic.claude-{haiku,sonnet,opus}-5-5` **and** on `arn:aws:bedrock:{us-east-1,us-east-2,us-west-2}::foundation-model/anthropic.claude-{haiku,sonnet,opus}-5-5`, the Regions the profiles route to (`aws bedrock get-inference-profile`). Both are checked on every call (docs/07 Phase 0 step 3; `deploy/devbox/main.tf` is a working, broader policy). No AWS Marketplace permissions: the account's model subscriptions already exist (docs/08 R24)
 - **Security group** `copperline-core-sg` (AWS refuses names that begin with `sg-`): ingress 8081, 8090 and 8095 from `10.50.2.0/24` (CE inside) only.
 - **S3 bucket** `copperline-demo-xc-logs` (optional, for the XC global log receiver).
+- **IAM role** `copperline-xc-site` (`xc_assume_role.tf`): the XC cloud credential for the CE site, as an assume role.
+  F5 XC's AWS account assumes it (external ID = the tenant ID `f5-amer-ent-qyyfhhfj`) with F5's AWS VPC site policy
+  (`xc-site-policy.json`, 181 actions). Created only when `-var f5xc_aws_account_id=<12 digits>` is set (from F5
+  support); then paste output `xc_assume_role_arn` into XC (Cloud Credentials -> AWS Assume Role). docs/08 R45.
 
 ## Notes
 
