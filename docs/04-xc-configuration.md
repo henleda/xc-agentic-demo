@@ -8,7 +8,7 @@ Field names in backticks come from public docs and Terraform registry pages. The
 
 | Object | Name | Key settings | TF resource |
 |---|---|---|---|
-| AWS VPC site | `copperline-aws-ce` | App Stack cluster with outside and inside interfaces (origin pools to EC2 use the inside network; `TODO(verify-xc)` that App Stack mode supports two interfaces on AWS, else use one interface, set IP pools to the outside network and allow the ce-outside subnet in `sg-core`), `m5.2xlarge` (minimum for App Stack), 100 GB disk, single node, label `copperline.demo/site=aws-ce`, offline survivability off (not needed) | `volterra_aws_vpc_site` (see `docs/08` R1 for the SMSv2 alternative) |
+| AWS VPC site | `copperline-aws-ce` | App Stack cluster with outside and inside interfaces (origin pools to EC2 use the inside network; `TODO(verify-xc)` that App Stack mode supports two interfaces on AWS, else use one interface, set IP pools to the outside network and allow the ce-outside subnet in `copperline-core-sg`), `m5.2xlarge` (minimum for App Stack), 100 GB disk, single node, label `copperline.demo/site=aws-ce`, offline survivability off (not needed) | `volterra_aws_vpc_site` (see `docs/08` R1 for the SMSv2 alternative) |
 | Virtual site | `vs-ce-aws` | Type CE, selector `copperline.demo/site in (aws-ce)` | `volterra_virtual_site` |
 | Virtual site | `vs-re-agents` | Type RE, selector on 3 named RE sites close to the presenter. `TODO(verify-xc)`: label key for RE selection | `volterra_virtual_site` |
 | vK8s | `agentic-demo-vk8s` | Virtual sites `[vs-re-agents, vs-ce-aws]`; **service isolation off** (so internal LBs work as designed) | `volterra_virtual_k8s` |

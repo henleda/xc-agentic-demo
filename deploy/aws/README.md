@@ -2,6 +2,9 @@
 
 ## Resources
 
+Region **us-east-2** (Ohio), zone us-east-2a: us-east-1's Elastic IP quota (5) is used up by other teams, and the NAT
+gateway needs one. Apply: `make deploy-aws` (or `terraform apply -var owner=... -var expires=YYYY-MM-DD`).
+
 - **VPC** `copperline-demo` with CIDR `10.50.0.0/16` and three subnets:
   - `ce-outside` (public, with IGW): `10.50.1.0/24`
   - `ce-inside` (private): `10.50.2.0/24`
@@ -13,8 +16,8 @@
 - **EC2** `copperline-core`:
   - t3.large, AL2023, Docker plus compose, in `core`
   - SSM access only (no SSH)
-  - Instance role allows `bedrock:InvokeModel*` (this also authorizes Converse; there is no `bedrock:Converse` action) on the three route inference profiles `arn:aws:bedrock:us-east-1:<account>:inference-profile/us.anthropic.claude-{haiku,sonnet,opus}-5-5` **and** on `arn:aws:bedrock:{us-east-1,us-east-2,us-west-2}::foundation-model/anthropic.claude-{haiku,sonnet,opus}-5-5`, the Regions the profiles route to (`aws bedrock get-inference-profile`). Both are checked on every call (docs/07 Phase 0 step 3; `deploy/devbox/main.tf` is a working, broader policy). No AWS Marketplace permissions: the account's model subscriptions already exist (docs/08 R24)
-- **Security group** `sg-core`: ingress 8081, 8090 and 8095 from `10.50.2.0/24` (CE inside) only.
+  - Instance role allows `bedrock:InvokeModel*` (this also authorizes Converse; there is no `bedrock:Converse` action) on the three route inference profiles in the deployment Region `arn:aws:bedrock:us-east-2:<account>:inference-profile/us.anthropic.claude-{haiku,sonnet,opus}-5-5` **and** on `arn:aws:bedrock:{us-east-1,us-east-2,us-west-2}::foundation-model/anthropic.claude-{haiku,sonnet,opus}-5-5`, the Regions the profiles route to (`aws bedrock get-inference-profile`). Both are checked on every call (docs/07 Phase 0 step 3; `deploy/devbox/main.tf` is a working, broader policy). No AWS Marketplace permissions: the account's model subscriptions already exist (docs/08 R24)
+- **Security group** `copperline-core-sg` (AWS refuses names that begin with `sg-`): ingress 8081, 8090 and 8095 from `10.50.2.0/24` (CE inside) only.
 - **S3 bucket** `copperline-demo-xc-logs` (optional, for the XC global log receiver).
 
 ## Notes
