@@ -10,9 +10,9 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 2. Create the `bedrock-runtime` interface VPC endpoint in the core subnet. Enable model access in Bedrock for the three route models (`fast`, `standard`, `premium`). Use inference profile IDs where the region requires them. Model access means the account's AWS Marketplace subscription to each model, started by the model's first call. Make that first call from a role with `aws-marketplace:Subscribe` (the SSO `Users` role), never from a service role: a caller without it gets one answer, then `AccessDeniedException` for everyone (docs/08 R24). The three route models are already subscribed in this account.
 3. Create EC2 `copperline-core` (t3.large, Amazon Linux 2023, Docker). Give it an instance role with `bedrock:InvokeModel` (Converse is authorized by it; there is no `bedrock:Converse` action) on the three route inference profiles in the deployment Region (`arn:aws:bedrock:us-east-2:<account>:inference-profile/us.anthropic.claude-*-5-5`; the demo's AWS side is in us-east-2 because us-east-1 has no Elastic IP left) **and** their foundation models in every Region the profiles route to: us-east-1, us-east-2, us-west-2 (`aws bedrock get-inference-profile` lists them). A `us.` profile call is checked against both; with only one, every call is `AccessDeniedException`. `deploy/devbox/main.tf` has a working policy. Its security group allows 8081, 8090 and 8095 from the CE inside subnet only.
 4. In XC:
-   1. Create the namespace `agentic-demo`.
-   2. Create the AWS cloud credential.
-   3. Create the AWS VPC site `copperline-aws-ce` in App Stack mode, size m5.2xlarge, using the existing VPC and subnets.
+   1. Create the namespace `agentic-demo`. In a shared tenant only a tenant admin can (the API certificate got 403, docs/08 R45); ask for admin on it.
+   2. Create the AWS cloud credential in the console (in Terraform its secret would be in state), in namespace `system`, and put its name in `XC_AWS_CRED_NAME`. Either an access key of an IAM user with F5's AWS VPC site policy (the SSO `Users` role cannot create IAM users or keys), or Assume Role: a role trusting F5 XC's AWS account (support ticket) with external ID = the tenant ID. XC checks it before building anything.
+   3. Create the AWS VPC site `copperline-aws-ce` in App Stack mode, size m5.2xlarge, using the existing VPC and the ce-outside subnet (App Stack has one interface, docs/08 R30). Steps 1, 3-5 are `deploy/xc/terraform/infra.tf` (`source scripts/xc_env.sh` first).
    4. Apply the site label.
    5. Create both virtual sites and the vK8s object.
    6. Download the vK8s kubeconfig to `~/.kube/agentic-demo.yaml`. Never commit it.
@@ -24,7 +24,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 - The CE site is ONLINE.
 - `kubectl --kubeconfig ~/.kube/agentic-demo.yaml get pods` works.
 - A test `nginx-unprivileged` Deployment pinned to each virtual site runs.
-- Bedrock Converse works from EC2 through the VPC endpoint (`scripts/check_bedrock.py`).
+- Bedrock Converse works from EC2 through the VPC endpoint (`uv run python scripts/check_bedrock.py`).
 
 ## Phase 1: Services, locally (about 3–4 days, Claude Code)
 

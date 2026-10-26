@@ -203,8 +203,11 @@ resource "aws_iam_instance_profile" "core" {
   role = aws_iam_role.core.name
 }
 
-# Ingress from the CE inside subnet only: 8081 ERP, 8090 AI gateway, 8095 cockpit (the XC origin pools).
+# Ingress from the CE subnets only: 8081 ERP, 8090 AI gateway, 8095 cockpit (the XC origin pools).
+# The App Stack CE has ONE interface, in ce-outside (docs/08 R30: the aws_vpc_site schema offers no inside subnet for
+# voltstack_cluster), so its origin traffic comes from 10.50.1.0/24. ce-inside stays allowed for a two-interface site.
 # The admin ports 8181/8190 are bound to 127.0.0.1 by compose and never opened here.
+# (The description still says "inside": changing it would replace the group under the running instance.)
 resource "aws_security_group" "core" {
   name        = "copperline-core-sg" # AWS refuses names that begin with sg-
   description = "copperline-core: ERP, AI gateway and cockpit from the CE inside subnet only"
@@ -215,7 +218,7 @@ resource "aws_security_group" "core" {
       from_port   = ingress.value
       to_port     = ingress.value
       protocol    = "tcp"
-      cidr_blocks = [aws_subnet.ce_inside.cidr_block]
+      cidr_blocks = [aws_subnet.ce_outside.cidr_block, aws_subnet.ce_inside.cidr_block]
     }
   }
   egress {
