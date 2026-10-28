@@ -12,7 +12,7 @@ Most of this phase needs a human with access. Claude Code writes the Terraform a
 4. In XC:
    1. Create the namespace `agentic-demo`. In a shared tenant only a tenant admin can (the API certificate got 403, docs/08 R45); ask for admin on it.
    2. Create the AWS cloud credential in the console (in Terraform its secret would be in state), in namespace `system`, and put its name in `XC_AWS_CRED_NAME`. Either an access key of an IAM user with F5's AWS VPC site policy (the SSO `Users` role cannot create IAM users or keys), or Assume Role: a role trusting F5 XC's AWS account (support ticket) with external ID = the tenant ID, which `deploy/aws/xc_assume_role.tf` creates once `f5xc_aws_account_id` is set. XC checks it before building anything. Not an SSO session key (`ASIA…`, the AWS portal's "Access keys"): XC has no field for its session token and it expires within hours.
-   3. Create the AWS VPC site `copperline-aws-ce` in App Stack mode, size m5.2xlarge, using the existing VPC and the ce-outside subnet (App Stack has one interface, docs/08 R30). Steps 1, 3-5 are `deploy/xc/terraform/infra.tf` (`source scripts/xc_env.sh` first).
+   3. Create the AWS VPC site `copperline-aws-ce` in App Stack mode, size m5.2xlarge, using the existing VPC and the ce-site subnet, which has no route table of ours (XC creates its own and refuses a subnet that has one; App Stack has one interface, docs/08 R30, R45). Steps 1, 3-5 are `deploy/xc/terraform/infra.tf` (`source scripts/xc_env.sh` first).
    4. Apply the site label.
    5. Create both virtual sites and the vK8s object.
    6. Download the vK8s kubeconfig to `~/.kube/agentic-demo.yaml`. Never commit it.

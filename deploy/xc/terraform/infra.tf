@@ -17,9 +17,9 @@ variable "aws_vpc_id" {
   description = "AWS_VPC_ID in .env (deploy/aws output)"
 }
 
-variable "aws_subnet_ce_outside" {
+variable "aws_subnet_ce_site" {
   type        = string
-  description = "AWS_SUBNET_CE_OUTSIDE in .env (deploy/aws output): the CE's only interface"
+  description = "AWS_SUBNET_CE_SITE in .env (deploy/aws output): the CE's only interface, a subnet with no route table association"
 }
 
 variable "xc_aws_cred_name" {
@@ -43,8 +43,9 @@ resource "volterra_namespace" "demo" {
 }
 
 # ---- The AWS CE: App Stack (voltstack_cluster), one node, in the existing VPC ------------------------------------
-# App Stack has ONE interface here (docs/08 R30): the node sits in ce-outside, which routes to the internet for
-# registration and reaches the core subnet (10.50.3.0/24, the EC2 origins) through the VPC's local route.
+# App Stack has ONE interface here (docs/08 R30). The node sits in ce-site, a subnet with no route table of ours: XC
+# creates its route table (default route to the internet gateway, for registration and the tunnels to the REs) and
+# refuses a subnet that already has one (R45). The core subnet (the EC2 origins) is reached through the VPC local route.
 
 resource "volterra_aws_vpc_site" "ce" {
   name          = "copperline-aws-ce"
@@ -70,7 +71,7 @@ resource "volterra_aws_vpc_site" "ce" {
     az_nodes {
       aws_az_name = var.aws_az
       local_subnet {
-        existing_subnet_id = var.aws_subnet_ce_outside
+        existing_subnet_id = var.aws_subnet_ce_site
       }
     }
 
@@ -85,9 +86,9 @@ resource "volterra_aws_vpc_site" "ce" {
   }
 
   no_worker_nodes          = true
-  egress_gateway_default   = true # ce-outside routes 0.0.0.0/0 to the internet gateway
+  egress_gateway_default   = true # egress through the VPC's internet gateway, on the route table XC creates
   f5xc_security_group      = true
-  f5_orchestrated_routing  = true # as the tenant's working App Stack site uses; manual_routing is untested here (R45)
+  f5_orchestrated_routing  = true # XC owns ce-site's route table (manual_routing was refused the same way, R45)
   disable_internet_vip     = true # public entry is on the REs
   default_blocked_services = true
   direct_connect_disabled  = true

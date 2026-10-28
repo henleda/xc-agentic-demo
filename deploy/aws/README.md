@@ -9,6 +9,7 @@ gateway needs one. Apply: `make deploy-aws`. Settings (tags, F5 XC's AWS account
   - `ce-outside` (public, with IGW): `10.50.1.0/24`
   - `ce-inside` (private): `10.50.2.0/24`
   - `core` (private): `10.50.3.0/24`
+  - `ce-site`: `10.50.4.0/24`, the CE's only interface, with **no** route table association: XC creates its route table (docs/08 R45). (`ce-outside` keeps the NAT gateway; `ce-inside` is unused by the single-interface App Stack site.)
 - **NAT gateway** for `core`. The cockpit needs outbound internet (public XC LBs for login, chat and partner calls; the vK8s API for S5), and the host pulls images. S5 does not depend on it, because vK8s pods sit on the CE, not in `core`.
 - **Interface VPC endpoints** in `core`, with private DNS on:
   - `com.amazonaws.<region>.bedrock-runtime`

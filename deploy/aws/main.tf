@@ -79,6 +79,17 @@ resource "aws_subnet" "core" {
   tags              = { Name = "copperline-core" }
 }
 
+# The CE's own subnet. XC creates and owns its route table (default route to the internet gateway, for the IPsec
+# tunnels to the REs), so it must have NO route table association here: XC refuses a subnet with a custom route table
+# ("The deployment will fail if the subnets have existing custom route table associations", F5 "Create AWS Site").
+# ce-outside could not be used: it carries the NAT gateway for core, so it needs our own route to the internet.
+resource "aws_subnet" "ce_site" {
+  vpc_id            = aws_vpc.demo.id
+  cidr_block        = "10.50.4.0/24"
+  availability_zone = var.az
+  tags              = { Name = "copperline-ce-site" }
+}
+
 # CE outside: public, through the internet gateway. The NAT gateway for core lives here too.
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.demo.id
@@ -204,8 +215,8 @@ resource "aws_iam_instance_profile" "core" {
 }
 
 # Ingress from the CE subnets only: 8081 ERP, 8090 AI gateway, 8095 cockpit (the XC origin pools).
-# The App Stack CE has ONE interface, in ce-outside (docs/08 R30: the aws_vpc_site schema offers no inside subnet for
-# voltstack_cluster), so its origin traffic comes from 10.50.1.0/24. ce-inside stays allowed for a two-interface site.
+# The App Stack CE has ONE interface (docs/08 R30), in ce-site, so its origin traffic comes from 10.50.4.0/24.
+# ce-outside and ce-inside stay allowed (an earlier layout and a two-interface site).
 # The admin ports 8181/8190 are bound to 127.0.0.1 by compose and never opened here.
 # (The description still says "inside": changing it would replace the group under the running instance.)
 resource "aws_security_group" "core" {
@@ -218,7 +229,7 @@ resource "aws_security_group" "core" {
       from_port   = ingress.value
       to_port     = ingress.value
       protocol    = "tcp"
-      cidr_blocks = [aws_subnet.ce_outside.cidr_block, aws_subnet.ce_inside.cidr_block]
+      cidr_blocks = [aws_subnet.ce_site.cidr_block, aws_subnet.ce_outside.cidr_block, aws_subnet.ce_inside.cidr_block]
     }
   }
   egress {
@@ -268,6 +279,7 @@ output "env" {
   value       = <<-EOT
     AWS_VPC_ID=${aws_vpc.demo.id}
     AWS_SUBNET_CE_OUTSIDE=${aws_subnet.ce_outside.id}
+    AWS_SUBNET_CE_SITE=${aws_subnet.ce_site.id}
     AWS_SUBNET_CE_INSIDE=${aws_subnet.ce_inside.id}
     AWS_SUBNET_CORE=${aws_subnet.core.id}
     CORE_EC2_PRIVATE_IP=${aws_instance.core.private_ip}
